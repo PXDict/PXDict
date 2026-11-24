@@ -1,0 +1,45 @@
+# Secrets & local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Data (never commit dictionaries or databases)
+/data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.mdx
+*.mdd
+*.zim
+*.dsl
+*.dz
+
+# Caches & build output
+.cache/
+dist/
+build/
+coverage/
+*.log
+
+# Go
+/gateway/bin/
+*.test
+*.out
+
+# Node
+node_modules/
+.vite/
+pwa/openapi.yaml
+
+# Editors / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+
+# Claude Code local settings
+.claude/settings.local.json
