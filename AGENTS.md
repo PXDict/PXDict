@@ -92,6 +92,7 @@ Architecture rules:
 ```text
 PXDict/
 ├── AGENTS.md, CLAUDE.md, README.md, CONTRIBUTING.md, SECURITY.md, CHANGELOG.md
+├── WUDICT_VERSION              # pinned wuDict tag (dev.sh, gen:api, Dockerfile default)
 ├── docs/
 │   ├── PLAN.md                 # phased plan; tick checklist items as work lands
 │   ├── design/wudict-pwa.md    # original design (archived, read-only, Vietnamese)

@@ -1,0 +1,7 @@
+{
+  "app.name": "PXDict",
+  "app.tagline": "Multi-user dictionary",
+  "status.checking": "Connecting to the server…",
+  "status.ok": "Server is up (version {version}).",
+  "status.down": "Cannot reach the server."
+}

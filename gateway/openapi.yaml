@@ -1,0 +1,64 @@
+openapi: 3.1.0
+info:
+  title: PXDict gateway API
+  version: 0.0.0
+  license:
+    name: GPL-3.0-or-later
+    identifier: GPL-3.0-or-later
+  description: |
+    PXDict's own API, served by pxdict-gateway under /app-api (plus /healthz). wuDict's routes that
+    the gateway proxies (/api/*, /res/*) are described by wuDict's own openapi.yaml.
+
+    Every error uses one shape: {"error": {"code": "snake_case", "message": "..."}}.
+    This contract is the source of the PWA's types (`npm run gen:api` in pwa/).
+servers:
+  - url: /
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      summary: Gateway health
+      tags: [system]
+      responses:
+        "200":
+          description: The gateway is up.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        default:
+          $ref: "#/components/responses/Error"
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status, version]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        version:
+          type: string
+          description: Gateway build version.
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Stable snake_case error code.
+              examples: [not_found]
+            message:
+              type: string
+              description: Human-readable message (English).
+  responses:
+    Error:
+      description: Error response.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"

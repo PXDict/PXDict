@@ -2,7 +2,7 @@
 
 | Script | Phase | Purpose |
 |---|---|---|
-| `dev.sh` | 1 | Run wuDict + gateway + Vite locally |
+| `dev.sh` | 1 | Run wuDict + gateway + Vite locally (see its header for options) |
 | `smoke-test.sh` | 2 | Smoke-test a built image |
 | `latest-wudict.sh` | 8 | Print the latest wuDict release tag with all required assets |
 | `setup-swap.sh` | 9 | Enable swap on the host |

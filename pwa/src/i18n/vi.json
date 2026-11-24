@@ -1,0 +1,7 @@
+{
+  "app.name": "PXDict",
+  "app.tagline": "Từ điển nhiều người dùng",
+  "status.checking": "Đang kết nối tới máy chủ…",
+  "status.ok": "Máy chủ đang hoạt động (phiên bản {version}).",
+  "status.down": "Không kết nối được tới máy chủ."
+}
