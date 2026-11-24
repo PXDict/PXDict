@@ -141,13 +141,19 @@ questions there have fallbacks.
 
 **Goal:** the repo builds and tests with empty code; CI is green.
 
-- [ ] `gateway/`: `go mod init`, `cmd/pxdict-gateway/main.go` (config loading, `/healthz`), `internal/` layout per AGENTS.md.
-- [ ] `pwa/`: Vite + strict TypeScript + a UI framework (suggest **Preact** or **Svelte** for small bundles; record an ADR), ESLint, Vitest, `assetsDir: "app-assets"`, i18n with `en` source + `vi`.
-- [ ] `npm run gen:api`: generate `wudict.schema.d.ts` (from the wuDict tag's `openapi.yaml`) and `app.schema.d.ts` (from `gateway/openapi.yaml`).
-- [ ] `scripts/dev.sh`: download the wuDict binary into `.cache/`, run wuDict + gateway (`go run`) + Vite dev server (proxy `/api`, `/res`, `/app-api` to the gateway).
-- [ ] `.github/workflows/ci.yml`: `go vet`, `staticcheck`, `go test`, `npm ci`, `typecheck`, `lint`, `test` on every PR.
+- [x] `gateway/`: `go mod init`, `cmd/pxdict-gateway/main.go` (config loading, `/healthz`), `internal/` layout per AGENTS.md.
+- [x] `pwa/`: Vite + strict TypeScript + a UI framework → **Preact** ([ADR 0003](adr/0003-pwa-ui-framework-preact.md)), ESLint, Vitest, `assetsDir: "app-assets"`, i18n with `en` source + `vi`.
+- [x] `npm run gen:api`: generate `wudict.schema.d.ts` (from the wuDict tag's `openapi.yaml`) and `app.schema.d.ts` (from `gateway/openapi.yaml`).
+- [x] `scripts/dev.sh`: download the wuDict binary into `.cache/`, run wuDict + gateway (`go run`) + Vite dev server (proxy `/api`, `/res`, `/app-api` to the gateway).
+- [x] `.github/workflows/ci.yml`: `go vet`, `staticcheck`, `go test`, `npm ci`, `typecheck`, `lint`, `test` on every PR.
 
 **Done when:** `scripts/dev.sh` serves an empty PWA page; CI is green.
+
+**Result:** the pinned wuDict tag lives in the root `WUDICT_VERSION` file (used by `dev.sh` and
+`gen:api`; the Dockerfile's default in Phase 2). `dev.sh` downloads the `-cgo` release binary by default
+(fine on glibc/macOS dev hosts) or builds the purego binary with `WUDICT_BUILD=source`. Generated API
+types are committed and CI fails if they are stale. TypeScript is pinned to 6.0.x because
+`typescript-eslint` does not support 7.x yet.
 
 ---
 
