@@ -69,6 +69,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   Saved words and Dictionaries screens (toggle, drag-and-drop and arrow ordering), a ☆ button per
   headword, recent searches in the empty search box, a new-dictionary notice, and preferences saved to
   the account; article frames follow the text size. HTTP isolation tests between users. ADR 0007.
+- Phase 6: dictionary proposals and admin review (ADR 0008). Users propose a dictionary (metadata +
+  files, or one `.zip`); files upload in resumable ≤ 32 MiB chunks (`Upload-Offset`) with SHA-256 while
+  writing, quotas per user, for the review queue and for free disk, and stay in `/data/proposals/<id>/`
+  until reviewed. On submit the gateway unpacks zips with zip-bomb limits (`yauzl`), checks names
+  (`storage/safe-path.ts`: no traversal, hidden names or symlinks) and file types, reads MDX/DSL/StarDict
+  headers, and warns about JavaScript, encryption and duplicates. Admins list and review proposals,
+  reject them (files deleted at once, reason kept) or approve them as `global`, `private` or `hidden`:
+  files move into `DICT_DIR`, wuDict rescans and indexes (`media=1`) in the background, and users see
+  the dictionary only once it is indexed. Admins can try hidden dictionaries by name, change visibility,
+  owner, title and trusted rendering, rescan, and retry indexing; the catalogue records the library
+  `uuid` from `info.txt`. Proposers are notified of decisions in the PWA. New PWA screens: Propose,
+  Admin → Proposals and Dictionaries. Contract test of the approval flow against the real wuDict.
 
 ### Changed
 - Reference wuDict version is v3.7.11 (v3.7.12 is only a pre-release).

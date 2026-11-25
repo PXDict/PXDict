@@ -1,16 +1,29 @@
 // The app shell: who is signed in (with an offline fallback), the routes, and the header.
 import { useCallback, useEffect, useState } from "preact/hooks";
-import { getMe, isNetworkError, markDictsSeen, onUnauthorized, signOut, ApiError, type Me, type UserSettings } from "./api/app";
+import {
+  getMe,
+  isNetworkError,
+  markDictsSeen,
+  markProposalsSeen,
+  onUnauthorized,
+  signOut,
+  ApiError,
+  type Me,
+  type UserSettings,
+} from "./api/app";
 import { onLocaleChange, t } from "./i18n";
 import { readLastUser, setActiveUser, wipeUserData, type LastUser } from "./lib/offline";
 import { loginUrl, navigate, safeNext, useLocation } from "./lib/router";
 import { applySettings } from "./lib/settings";
 import { Account } from "./views/Account";
+import { AdminDicts } from "./views/AdminDicts";
+import { AdminProposals } from "./views/AdminProposals";
 import { Dictionaries } from "./views/Dictionaries";
 import { Favorites } from "./views/Favorites";
 import { Notice } from "./views/Field";
 import { History } from "./views/History";
 import { Login } from "./views/Login";
+import { Proposals } from "./views/Proposals";
 import { ResetPassword } from "./views/ResetPassword";
 import { SearchView } from "./views/SearchView";
 import { UpdatePrompt } from "./views/UpdatePrompt";
@@ -119,6 +132,9 @@ export function App() {
   const onDictsSeen = useCallback(() => {
     patchMe({ newDicts: [] });
   }, [patchMe]);
+  const onProposalsSeen = useCallback(() => {
+    patchMe({ proposalUpdates: [] });
+  }, [patchMe]);
 
   if (session.kind === "loading") {
     return (
@@ -154,6 +170,9 @@ export function App() {
   else if (loc.path === "/history") page = me ? <History enabled={me.settings.historyEnabled} /> : offline;
   else if (loc.path === "/favorites") page = me ? <Favorites /> : offline;
   else if (loc.path === "/dictionaries") page = me ? <Dictionaries onSeen={onDictsSeen} /> : offline;
+  else if (loc.path === "/proposals") page = me ? <Proposals onSeen={onProposalsSeen} /> : offline;
+  else if (loc.path === "/admin/proposals" && me?.user.role === "admin") page = <AdminProposals />;
+  else if (loc.path === "/admin/dicts" && me?.user.role === "admin") page = <AdminDicts />;
   else if (publicPaths.has(loc.path)) page = null;
   else {
     page = (
@@ -180,6 +199,8 @@ export function App() {
   );
 
   const newDicts = me?.newDicts ?? [];
+  const decisions = me?.proposalUpdates ?? [];
+  const isAdmin = me?.user.role === "admin";
 
   return (
     <>
@@ -192,6 +213,19 @@ export function App() {
           {navLink("/history", t("nav.history"))}
           {navLink("/favorites", t("nav.favorites"))}
           {navLink("/dictionaries", t("nav.dicts"))}
+          {navLink("/proposals", t("nav.propose"))}
+          {isAdmin && (
+            <a
+              href="/admin/proposals"
+              aria-current={loc.path.startsWith("/admin/") ? "page" : undefined}
+              onClick={(e) => {
+                e.preventDefault();
+                navigate("/admin/proposals");
+              }}
+            >
+              {t("nav.admin")}
+            </a>
+          )}
           {navLink("/account", name)}
           <button type="button" class="link" onClick={doSignOut}>
             {t("nav.signOut")}
@@ -216,6 +250,36 @@ export function App() {
             onClick={() => {
               onDictsSeen();
               markDictsSeen().catch(() => {
+                // Announced again next time.
+              });
+            }}
+          >
+            {t("newDicts.dismiss")}
+          </button>
+        </div>
+      )}
+      {decisions.length > 0 && loc.path !== "/proposals" && (
+        <div class="shell banner" role="status">
+          {decisions.map((d) => (
+            <span key={d.id}>
+              {t(d.status === "approved" ? "proposalUpdates.approved" : "proposalUpdates.rejected", { title: d.title })}{" "}
+            </span>
+          ))}
+          <a
+            href="/proposals"
+            onClick={(e) => {
+              e.preventDefault();
+              navigate("/proposals");
+            }}
+          >
+            {t("proposalUpdates.view")}
+          </a>{" "}
+          <button
+            type="button"
+            class="link"
+            onClick={() => {
+              onProposalsSeen();
+              markProposalsSeen().catch(() => {
                 // Announced again next time.
               });
             }}

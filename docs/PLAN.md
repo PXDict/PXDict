@@ -78,11 +78,12 @@ dictionaries(id PRIMARY KEY,           -- PXDict's own stable id (also the folde
 user_dicts(user_id, dict_id, enabled, position, is_new, created_at, PRIMARY KEY(user_id, dict_id))
                                        -- filled in lazily (ADR 0007)
 
-proposals(id, user_id, title, description, source_url, license_note,
+proposals(id, user_id NULL /* ON DELETE SET NULL */, title, description, source_url, license_note,
           status CHECK(status IN ('uploading','pending','approved','rejected','withdrawn')),
-          total_bytes, file_count, review_note, reviewed_by, reviewed_at,
-          approved_scope CHECK(approved_scope IN ('global','private')), created_at)
-proposal_files(proposal_id, rel_path, bytes, sha256, kind)                  -- kind: mdx|mdd|css|js|zim|other
+          total_bytes, file_count, metadata_json, warnings_json, review_note, reviewed_by, reviewed_at,
+          approved_scope CHECK(approved_scope IN ('global','private','hidden')), dict_id,
+          decision_seen, created_at, submitted_at, updated_at)                    -- ADR 0008
+proposal_files(proposal_id, position, rel_path, bytes, received, sha256, kind) -- kind: main|companion|resource|zip
 
 audit_log(id, actor_user_id, action, target_type, target_id, details_json, bytes_freed, created_at)
 ```
@@ -95,7 +96,7 @@ audit_log(id, actor_user_id, action, target_type, target_id, details_json, bytes
 /data/.wudict/{config,data,state,home}   wuDict XDG folders (HOME must not be /data, see notes Q12)
 /data/gateway/pxdict.db      gateway data
 /data/proposals/<id>/        upload quarantine (outside DICT_DIR)
-/data/tmp/                   in-progress uploads, cleaned periodically
+/data/tmp/proposals/<id>/    in-progress uploads (upload/, files/), cleaned periodically
 ```
 
 ## 2. Gateway API (`/app-api`; request/response schemas in `shared/src/api/`)
@@ -108,10 +109,10 @@ audit_log(id, actor_user_id, action, target_type, target_id, details_json, bytes
 | Settings | `GET/PUT /me/settings` | user |
 | My dictionaries | `GET /me/dicts` (allowed list + enabled + order), `PUT /me/dicts`, `POST /me/dicts/seen` (acknowledge new dictionaries) | user |
 | Favorites | `GET /me/favorites`, `POST /me/favorites {headword, dictId, note?}`, `DELETE /me/favorites?headword=&dict=`, `GET /me/favorites/export?format=csv\|json` | user |
-| Proposals | `POST /proposals` (multipart, size-limited), `GET /me/proposals`, `DELETE /proposals/{id}` (while pending) | user |
+| Proposals ([ADR 0008](adr/0008-dictionary-proposals.md)) | `GET /proposals/limits`, `POST /proposals` (metadata + file list), `PUT /proposals/{id}/files/{index}` (chunk, `Upload-Offset`), `POST /proposals/{id}/submit`, `GET /proposals/{id}`, `DELETE /proposals/{id}` (while uploading or pending), `GET /me/proposals`, `POST /me/proposals/seen` | user |
 | Admin: users | Better Auth `admin` plugin endpoints (list, create, set role, ban/unban, revoke sessions, set password, impersonate, remove) + PXDict `GET/POST/DELETE /admin/invites` | admin |
 | Admin: proposals | `GET /admin/proposals`, `GET /admin/proposals/{id}`, `POST .../{id}/approve {scope, dict_id, trusted_render}`, `POST .../{id}/reject {note}` | admin |
-| Admin: dictionaries | `GET /admin/dicts`, `PATCH /admin/dicts/{id}` (visibility, trusted_render, title), `POST /admin/dicts/rescan`, `GET /admin/dicts/{id}/index-status` | admin |
+| Admin: dictionaries | `GET /admin/dicts`, `PATCH /admin/dicts/{id}` (visibility, owner, trusted_render, title), `POST /admin/dicts/rescan`, `GET /admin/dicts/{id}/index-status`, `POST /admin/dicts/{id}/index` (retry) | admin |
 | Admin: storage | `GET /admin/storage` (overview), `POST /admin/storage/plan` (dry-run → items + bytes + `plan_id`), `POST /admin/storage/execute {plan_id}` | admin |
 | Admin: misc | `GET /admin/audit`, `GET /admin/system` (wuDict version, RAM, disk) | admin |
 | System | `GET /healthz` (gateway + wuDict) | public |
@@ -311,24 +312,24 @@ and OIDC are covered end to end by the gateway tests, passkeys only up to the We
 **Goal:** users propose new dictionary files; an admin reviews them before they can be used.
 
 **User side**
-- [ ] Proposal form: title, description, source URL, license note, files (`.mdx` + `.mdd`, `.css`, `.js`, images; or one `.zip`; other formats per the list confirmed in Phase 0).
-- [ ] Stream uploads into `/data/tmp/`, enforce `MAX_UPLOAD_BYTES`, compute SHA-256 while writing, chunked/resumable uploads for large files; move into `/data/proposals/<id>/` only when complete.
-- [ ] Quotas: pending proposals per user, total pending bytes system-wide; refuse when free disk is below a threshold.
-- [ ] Users see the status of their proposals and can withdraw while `pending` (files deleted immediately).
+- [x] Proposal form: title, description, source URL, license note, files (`.mdx` + `.mdd`, `.css`, `.js`, images; or one `.zip`; other formats per the list confirmed in Phase 0).
+- [x] Stream uploads into `/data/tmp/`, enforce `MAX_UPLOAD_BYTES`, compute SHA-256 while writing, chunked/resumable uploads for large files; move into `/data/proposals/<id>/` only when complete. Every upload is chunked (≤ 32 MiB, `Upload-Offset`), [ADR 0008](adr/0008-dictionary-proposals.md).
+- [x] Quotas: pending proposals per user, total pending bytes system-wide; refuse when free disk is below a threshold.
+- [x] Users see the status of their proposals and can withdraw while `pending` (files deleted immediately).
 
 **Automatic checks on receipt**
-- [ ] Safe file names (no `..`, no absolute paths, no symlinks), extension allowlist.
-- [ ] Zip: limits on entry count, total uncompressed size, compression ratio (zip-bomb protection).
-- [ ] Read format headers (MDX: version, headword count, encoding) to show the admin; warn if JS is present.
-- [ ] Duplicate detection: SHA-256 matching an existing dictionary or another proposal.
+- [x] Safe file names (no `..`, no absolute paths, no symlinks), extension allowlist.
+- [x] Zip: limits on entry count, total uncompressed size, compression ratio (zip-bomb protection).
+- [x] Read format headers (MDX: version, headword count, encoding) to show the admin; warn if JS is present. Also DSL (name, languages) and StarDict `.ifo`.
+- [x] Duplicate detection: SHA-256 matching an existing dictionary or another proposal.
 
 **Admin side**
-- [ ] Proposal list (filter by status) and detail: proposer, files, sizes, hashes, metadata, warnings.
-- [ ] **Preview before approval**: `wudict ingest` works on a separate library while the main server runs (different `SERVER_PORT`/`DB_DIR`), so a temporary instance is feasible; but an index built at a staging path is **not** reused after the move (absolute paths must match) — budget a second ingest, or use the `hidden` fallback below. Option A: index into a separate staging directory with a temporary wuDict instance and try lookups in a sandboxed iframe. If not feasible: approve as `hidden`, let the admin try it, then switch to `global`.
-- [ ] Approve: choose `dict_id`, scope `global` (all users) or `private` (proposer only), `trusted_render` flag (off by default) → move files into `/data/dictionaries/<dict_id>/` (same-filesystem rename), `GET /api/rescan` (new files are not auto-detected), find the row by path, create the `dictionaries` row, **explicitly** `GET /api/ingest?dict=<id>&media=1` (SSE `progress`/`done`/`error`) before users can search it (search-before-index costs ~2.5× the RAM), record `wudict_uuid` from `info.txt`, surface indexing errors.
-- [ ] Reject: record a reason, **delete files immediately** (free disk), keep metadata so the user sees the reason.
-- [ ] Notify the user in the PWA when a proposal is approved/rejected.
-- [ ] Catalogue sync: a "rescan" action (`GET /api/rescan`) reconciles `/data/dictionaries` + `/api/dicts` with the `dictionaries` table and records `wudict_uuid` from `info.txt`. The sync itself runs since Phase 5 on every listing change: dictionaries copied in manually → `source='builtin'` with `BUILTIN_DICT_VISIBILITY` (`global` by default; `hidden` keeps them back until an admin enables them, [ADR 0007](adr/0007-per-user-dictionaries-and-history.md)).
+- [x] Proposal list (filter by status) and detail: proposer, files, sizes, hashes, metadata, warnings.
+- [x] **Preview before approval** (done with the `hidden` fallback: admins may search any listed dictionary by naming it, [ADR 0008](adr/0008-dictionary-proposals.md)): `wudict ingest` works on a separate library while the main server runs (different `SERVER_PORT`/`DB_DIR`), so a temporary instance is feasible; but an index built at a staging path is **not** reused after the move (absolute paths must match) — budget a second ingest, or use the `hidden` fallback below. Option A: index into a separate staging directory with a temporary wuDict instance and try lookups in a sandboxed iframe. If not feasible: approve as `hidden`, let the admin try it, then switch to `global`.
+- [x] Approve: choose `dict_id`, scope `global` (all users) or `private` (proposer only), `trusted_render` flag (off by default) → move files into `/data/dictionaries/<dict_id>/` (same-filesystem rename), `GET /api/rescan` (new files are not auto-detected), find the row by path, create the `dictionaries` row, **explicitly** `GET /api/ingest?dict=<id>&media=1` (SSE `progress`/`done`/`error`) before users can search it (search-before-index costs ~2.5× the RAM), record `wudict_uuid` from `info.txt`, surface indexing errors.
+- [x] Reject: record a reason, **delete files immediately** (free disk), keep metadata so the user sees the reason.
+- [x] Notify the user in the PWA when a proposal is approved/rejected.
+- [x] Catalogue sync: a "rescan" action (`GET /api/rescan`) reconciles `/data/dictionaries` + `/api/dicts` with the `dictionaries` table and records `wudict_uuid` from `info.txt`. The sync itself runs since Phase 5 on every listing change: dictionaries copied in manually → `source='builtin'` with `BUILTIN_DICT_VISIBILITY` (`global` by default; `hidden` keeps them back until an admin enables them, [ADR 0007](adr/0007-per-user-dictionaries-and-history.md)).
 
 **Done when:** a user proposes a small MDX → the admin reviews and approves it as `global` → every user sees it and can look words up; a rejected proposal leaves no files on disk.
 

@@ -4,3 +4,5 @@ export * from "./api/auth";
 export * from "./api/error";
 export * from "./api/health";
 export * from "./api/me";
+export * from "./api/admin-dicts";
+export * from "./api/proposals";

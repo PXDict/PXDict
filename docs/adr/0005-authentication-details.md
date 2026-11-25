@@ -60,5 +60,5 @@ plan left the mechanism open:
   cookie is not sent and invited users cannot sign up with Apple directly (they can sign up another
   way and link Apple afterwards).
 - Deleting a user removes their sessions, accounts, passkeys and two-factor data (foreign keys). The
-  per-user tables of later phases must reference `user.id` with `ON DELETE CASCADE`; asking what to do
-  with a deleted user's proposals is part of Phase 6.
+  per-user tables of later phases must reference `user.id` with `ON DELETE CASCADE`. Proposals are the
+  exception: they keep their history with `ON DELETE SET NULL` ([ADR 0008](0008-dictionary-proposals.md)).

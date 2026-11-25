@@ -32,6 +32,11 @@ const known: Record<string, MessageKey> = {
   failed_to_unlink_last_account: "error.lastAccount",
   unknown_dict: "error.unknownDict",
   too_many_favorites: "error.tooManyFavorites",
+  too_large: "error.proposalTooLarge",
+  too_many_proposals: "error.tooManyProposals",
+  low_disk: "error.lowDisk",
+  review_queue_full: "error.lowDisk",
+  dict_id_taken: "error.dictIdTaken",
 };
 
 export function errorMessage(err: unknown): string {
@@ -40,7 +45,7 @@ export function errorMessage(err: unknown): string {
     const key = known[err.code];
     if (key) return t(key);
     if (err.status === 429) return t("error.tooManyRequests");
-    if (err.status === 403 && err.message) return err.message;
+    if ((err.status === 403 || err.status === 422) && err.message) return err.message;
     if (err.status >= 500) return t("error.server");
   }
   if (err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "AbortError")) {

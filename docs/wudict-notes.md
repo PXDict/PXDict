@@ -285,11 +285,26 @@ Found while building the image and the contract tests (same tag, purego build):
 - `GET /api/config` with the token answers 200 and without it 401: `/healthz` uses it to check both
   that wuDict is up and that the gateway's token is right.
 
+## Phase 6 additions
+
+Checked with the official v3.7.11 binary through the gateway (`contract.test.ts`, "an approved proposal
+is rescanned, indexed and searchable"):
+
+- The approval flow works as Q10 describes: files renamed into `DICT_DIR/<dictId>/` → `GET /api/rescan`
+  lists them (with `source` = the new absolute path, no `dbPath`) → `GET /api/ingest?dict=<id>&media=1`
+  streams `progress` and `done` → the next `/api/dicts` carries `folder`/`dbPath`, and search works.
+- `db/<name>/info.txt` is a commented receipt of `key = value` lines; the stable id is the line
+  `uuid = <32 hex digits>` (e.g. `uuid = f4db34b10ddaf4f2be36ff2eb79bb6ed`). Other keys: `name`,
+  `format`, `entries`, `index`, `media`, `source`, `source_size`, `source_mtime`, `imported`.
+
 ## Open questions
 
 Nothing blocks Phase 1. These have a fallback and are re-checked later:
 
 - [ ] Delete-originals for formats other than MDX/MDD (ZIM, StarDict, DSL, BGL, slob). Fallback: hidden.
+- [ ] Proposals of StarDict, slob, BGL and ZIM files (Phase 6 accepts them by their usual file names,
+  `gateway/src/proposals/formats.ts`). Not tried with real files; an indexing error is shown to the admin
+  and the dictionary stays hidden.
 - [x] Cookies/`Sec-Fetch-*` for `/r/` requests from a sandboxed iframe (Phase 4): no longer depended on.
   `/r/` URLs carry their own signed token and the gateway accepts them without cookies or fetch
   metadata checks ([ADR 0006](adr/0006-article-rendering-and-offline.md)). The contract test checks a DSL

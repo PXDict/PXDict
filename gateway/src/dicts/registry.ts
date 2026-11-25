@@ -10,10 +10,17 @@
 // Per user, `user_dicts` holds the order and the enabled flags. It is filled in lazily: a dictionary
 // the user may use but has no row for is appended, enabled (and flagged new unless this is the user's
 // first visit), so newly published global dictionaries reach every user without a bulk insert.
+//
+// Admins may also search every listed dictionary they cannot normally use (hidden ones, other users'
+// private ones) by naming it in `dict=`: that is how a proposal approved as "hidden" is tried before it
+// is published (ADR 0008). Those dictionaries are never part of an admin's default search set.
+import fs from "node:fs";
 import { and, eq, inArray, or } from "drizzle-orm";
+import { hasAdminRole } from "../auth/auth";
 import type { Db } from "../db/client";
-import { dictionaries, userDicts } from "../db/schema";
+import { dictionaries, user, userDicts } from "../db/schema";
 import type { Logger } from "../log";
+import { safeJoinSync } from "../storage/safe-path";
 import type { CatalogSnapshot, DictAccess, UserDictView, UsableDict, WudictCatalog } from "../wudict/catalog";
 
 export type DictionaryRow = typeof dictionaries.$inferSelect;
@@ -32,6 +39,17 @@ export interface DictRegistryOptions {
   logger: Logger;
   /** Visibility of a dictionary found in DICT_DIR without a proposal. */
   builtinVisibility: "global" | "hidden";
+  /** DB_DIR: where db/<name>/info.txt holds a dictionary's stable `uuid`. Omitted in some tests. */
+  dbDir?: string;
+}
+
+/**
+ * The `uuid` line of db/<name>/info.txt: "key = value" lines, e.g. `uuid = f4db34b10ddaf4f2be36ff2eb79bb6ed`
+ * (docs/wudict-notes.md Q6 and "Phase 6 additions").
+ */
+export function parseInfoUuid(text: string): string | undefined {
+  const m = /^\s*uuid\s*[=:]\s*([0-9A-Za-z-]{8,64})\s*$/m.exec(text);
+  return m?.[1];
 }
 
 /** PXDict ids: lower-case letters, digits and "-" (shared DictId). */
@@ -56,6 +74,7 @@ export class DictRegistry implements DictAccess {
   readonly #catalog: Pick<WudictCatalog, "snapshot">;
   readonly #logger: Logger;
   readonly #builtinVisibility: "global" | "hidden";
+  readonly #dbDir: string | undefined;
   #syncedVersion: number | undefined;
 
   constructor(opts: DictRegistryOptions) {
@@ -63,6 +82,17 @@ export class DictRegistry implements DictAccess {
     this.#catalog = opts.catalog;
     this.#logger = opts.logger;
     this.#builtinVisibility = opts.builtinVisibility;
+    this.#dbDir = opts.dbDir;
+  }
+
+  /** The library uuid of an indexed dictionary, or undefined (not indexed, unreadable, no DB_DIR). */
+  #uuidOf(libraryDir: string | undefined): string | undefined {
+    if (!libraryDir || !this.#dbDir) return undefined;
+    try {
+      return parseInfoUuid(fs.readFileSync(safeJoinSync(this.#dbDir, `${libraryDir}/info.txt`), "utf8"));
+    } catch {
+      return undefined;
+    }
   }
 
   /** Brings the table up to date with wuDict's listing (cheap when nothing changed). Throws when wuDict cannot be asked. */
@@ -83,14 +113,21 @@ export class DictRegistry implements DictAccess {
       const usedIds = new Set(rows.map((r) => r.id));
       const find = (pred: (r: DictionaryRow) => boolean) => rows.find((r) => !claimed.has(r.id) && pred(r));
 
+      const usedUuids = new Set(rows.map((r) => r.wudictUuid).filter((u) => u !== null));
       for (const w of snap.rows) {
+        const uuid = this.#uuidOf(w.libraryDir);
         const match =
           find((r) => r.wudictId === w.id) ??
           (w.libraryDir ? find((r) => r.libraryDir === w.libraryDir) : undefined) ??
-          (w.sourcePath ? find((r) => r.sourcePath === w.sourcePath) : undefined);
+          (w.sourcePath ? find((r) => r.sourcePath === w.sourcePath) : undefined) ??
+          (uuid ? find((r) => r.wudictUuid === uuid) : undefined);
+        // A uuid already recorded for another row is not taken twice (copied library folders).
+        const newUuid = uuid && !usedUuids.has(uuid) ? uuid : undefined;
+        if (newUuid) usedUuids.add(newUuid);
         if (match) {
           claimed.add(match.id);
           const changes: Partial<DictionaryRow> = {};
+          if (newUuid && match.wudictUuid === null) changes.wudictUuid = newUuid;
           if (match.wudictId !== w.id) changes.wudictId = w.id;
           if (w.libraryDir && match.libraryDir !== w.libraryDir) changes.libraryDir = w.libraryDir;
           if (w.sourcePath && match.sourcePath !== w.sourcePath) changes.sourcePath = w.sourcePath;
@@ -110,6 +147,7 @@ export class DictRegistry implements DictAccess {
           .values({
             id,
             wudictId: w.id,
+            wudictUuid: newUuid ?? null,
             libraryDir: w.libraryDir ?? null,
             sourcePath: w.sourcePath ?? null,
             title: w.name,
@@ -173,7 +211,10 @@ export class DictRegistry implements DictAccess {
     });
   }
 
-  /** The same list, keyed for the proxy; only dictionaries wuDict lists now. */
+  /**
+   * The same list, keyed for the proxy; only dictionaries wuDict lists now. For an admin, every other
+   * listed dictionary follows, usable by name but never enabled.
+   */
   async forUser(userId: string): Promise<UserDictView> {
     await this.refresh();
     const usable = new Map<string, UsableDict>();
@@ -184,7 +225,64 @@ export class DictRegistry implements DictAccess {
       usable.set(w, { dictId: u.dict.id, title: u.dict.title, enabled: u.enabled, trusted: u.dict.trustedRender });
       if (u.enabled) enabled.push(w);
     }
+    if (this.#isAdmin(userId)) {
+      const rest = this.#db.select().from(dictionaries).all();
+      rest.sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+      for (const d of rest) {
+        if (!d.wudictId || usable.has(d.wudictId)) continue;
+        usable.set(d.wudictId, { dictId: d.id, title: d.title, enabled: false, trusted: d.trustedRender });
+      }
+    }
     return { usable, enabled };
+  }
+
+  /** The role in the database (not the session's cookie cache), like guards.requireAdmin. */
+  #isAdmin(userId: string): boolean {
+    const u = this.#db.select({ role: user.role, banned: user.banned }).from(user).where(eq(user.id, userId)).get();
+    return !!u && !u.banned && hasAdminRole(u.role);
+  }
+
+  /** Every dictionary, for admins, by title. */
+  all(): DictionaryRow[] {
+    const rows = this.#db.select().from(dictionaries).all();
+    return rows.sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+  }
+
+  get(dictId: string): DictionaryRow | undefined {
+    return this.#db.select().from(dictionaries).where(eq(dictionaries.id, dictId)).get();
+  }
+
+  /**
+   * Changes a dictionary's title, visibility, owner or trusted_render. Answers the row, undefined when
+   * it does not exist, or "owner_required" for a private dictionary without an owner.
+   */
+  updateDict(
+    dictId: string,
+    patch: {
+      title?: string | undefined;
+      visibility?: DictionaryRow["visibility"] | undefined;
+      ownerUserId?: string | undefined;
+      trustedRender?: boolean | undefined;
+    },
+  ): DictionaryRow | "owner_required" | undefined {
+    const row = this.get(dictId);
+    if (!row) return undefined;
+    const visibility = patch.visibility ?? row.visibility;
+    const owner = patch.ownerUserId ?? row.ownerUserId;
+    if (visibility === "private" && !owner) return "owner_required";
+    return this.#db
+      .update(dictionaries)
+      .set({
+        ...(patch.title !== undefined ? { title: patch.title } : {}),
+        ...(patch.trustedRender !== undefined ? { trustedRender: patch.trustedRender } : {}),
+        visibility,
+        // Only a private dictionary has an owner.
+        ownerUserId: visibility === "private" ? owner : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(dictionaries.id, dictId))
+      .returning()
+      .get();
   }
 
   /**

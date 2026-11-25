@@ -26,6 +26,7 @@ import { readJson, readQuery } from "../http/body";
 import { jsonError } from "../http/errors";
 import { originCheck } from "../http/origin";
 import type { Logger } from "../log";
+import type { ProposalService } from "../proposals/service";
 import type { SettingsStore } from "../settings/settings";
 
 export interface MeRoutesOptions {
@@ -36,6 +37,7 @@ export interface MeRoutesOptions {
   settings: SettingsStore;
   history: HistoryStore;
   favorites: FavoritesStore;
+  proposals: Pick<ProposalService, "unseenDecisions">;
 }
 
 const myDict = (u: UserDict): MyDict => ({
@@ -122,6 +124,7 @@ export function createMeRoutes(opts: MeRoutesOptions): Hono<AuthEnv> {
         .list(user.id)
         .filter((u) => u.isNew && u.dict.wudictId !== null)
         .map((u) => ({ id: u.dict.id, title: u.dict.title })),
+      proposalUpdates: opts.proposals.unseenDecisions(user.id),
     } satisfies Me);
   });
 
