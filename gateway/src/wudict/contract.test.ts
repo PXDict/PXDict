@@ -10,11 +10,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createApp } from "../app";
-import { openDatabase } from "../db/client";
-import { createLogger } from "../log";
-import { migrationsDir, ndjsonLines } from "../test/harness";
-import { WudictCatalog } from "./catalog";
+import { harness, ndjsonLines } from "../test/harness";
 import { WudictClient } from "./client";
 
 const bin = process.env.WUDICT_BIN;
@@ -50,7 +46,7 @@ describe.skipIf(!bin)("contract with the real wuDict", () => {
   let dir: string;
   let proc: ChildProcess | undefined;
   let base: URL;
-  let app: ReturnType<typeof createApp>;
+  let app: { request: (path: string) => Promise<Response> };
   let dictId: string;
 
   beforeAll(async () => {
@@ -94,13 +90,9 @@ describe.skipIf(!bin)("contract with the real wuDict", () => {
     }
 
     const client = new WudictClient({ baseUrl: base, token });
-    app = createApp({
-      version: "contract",
-      logger: createLogger("error", () => undefined),
-      db: openDatabase({ file: ":memory:", migrationsDir }),
-      wudict: client,
-      access: new WudictCatalog({ client, ttlMs: 0 }),
-    });
+    const h = harness({ wudict: client });
+    // Signed in as a regular user, as the PWA would be.
+    app = { request: h.request };
 
     const lines = await ndjsonLines(await app.request("/api/dicts"));
     const row = lines.find((l) => l.t === "dict");

@@ -1,12 +1,19 @@
 // Entry point of pxdict-gateway, the single entry point of a PXDict container: it serves the PWA, the
 // /app-api endpoints and an allowlisted proxy to the loopback wuDict server.
+//
+//   node pxdict-gateway.mjs                                   run the server
+//   node pxdict-gateway.mjs user reset-password <email|username>   rescue: print a new password
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app";
+import { createAuth } from "./auth/auth";
+import { bootstrapAdmin, resetPasswordCli } from "./auth/bootstrap";
+import { createSmtpMailer } from "./auth/mailer";
 import { ConfigError, loadConfig, type Config } from "./config";
-import { databaseFile, openDatabase } from "./db/client";
-import { createLogger } from "./log";
+import { databaseFile, openDatabase, type Db } from "./db/client";
+import { createLogger, type Logger } from "./log";
 import { WudictCatalog } from "./wudict/catalog";
 import { WudictClient } from "./wudict/client";
 
@@ -15,18 +22,50 @@ const bundled = typeof __PXDICT_BUNDLED__ === "boolean" && __PXDICT_BUNDLED__;
 const migrationsDir = fileURLToPath(new URL(bundled ? "./drizzle/" : "../drizzle/", import.meta.url));
 const shutdownTimeoutMs = 10_000;
 
-function main(): void {
+/** process.env without blank values, so a blank variable does not hide a default. */
+function definedEnv(): Record<string, string> {
+  return Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => !!e[1]?.trim()));
+}
+
+const usage = "usage: node pxdict-gateway.mjs [user reset-password <email|username>]";
+
+/** `user reset-password <email|username>`: sets a random password, signs the user out, prints it. */
+async function runCli(args: string[], config: Config, db: Db, logger: Logger): Promise<number> {
+  const [group, command, identifier, ...rest] = args;
+  if (group !== "user" || command !== "reset-password" || !identifier || rest.length) {
+    process.stderr.write(`${usage}\n`);
+    return 2;
+  }
+  const auth = createAuth({ config, db, logger, mailer: undefined, rateLimit: false });
+  const result = await resetPasswordCli(auth, db, identifier);
+  if (!result) {
+    process.stderr.write(`no user with email or username ${JSON.stringify(identifier)}\n`);
+    return 1;
+  }
+  process.stdout.write(`New password for ${identifier} (all sessions were signed out):\n${result.password}\n`);
+  return 0;
+}
+
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
   let config: Config;
   try {
-    config = loadConfig();
+    // The CLI talks to neither wuDict nor browsers: placeholders stand in for their secrets when it
+    // runs without the server's environment (e.g. `docker exec`).
+    const placeholder = randomBytes(32).toString("hex");
+    const cliDefaults = args.length ? { AUTH_TOKEN: placeholder, BETTER_AUTH_SECRET: placeholder } : {};
+    config = loadConfig({ ...cliDefaults, ...definedEnv() });
   } catch (err) {
     if (!(err instanceof ConfigError)) throw err;
     createLogger().error("pxdict-gateway stopped: invalid configuration", { issues: err.issues });
     process.exit(1);
   }
 
-  const logger = createLogger(config.logLevel);
-  if (config.publicUrlIsDefault) {
+  // The CLI logs only warnings and errors (to stderr), so its stdout is just the result.
+  const logger = args.length
+    ? createLogger("warn", (line) => process.stderr.write(line))
+    : createLogger(config.logLevel);
+  if (config.publicUrlIsDefault && !args.length) {
     logger.warn("PUBLIC_URL is not set; using the default", { publicUrl: config.publicUrl.origin });
   }
 
@@ -38,7 +77,29 @@ function main(): void {
     logger.error("pxdict-gateway stopped: cannot open the database", { file, err });
     process.exit(1);
   }
+  if (args.length) {
+    const code = await runCli(args, config, db, logger);
+    db.$client.close();
+    process.exit(code);
+  }
   logger.info("database ready", { file });
+
+  const mailer = config.auth.smtp ? createSmtpMailer(config.auth.smtp) : undefined;
+  const auth = createAuth({ config, db, logger, mailer });
+  try {
+    await bootstrapAdmin(auth, db, config, logger);
+  } catch (err) {
+    logger.error("pxdict-gateway stopped: cannot create the first admin", { err });
+    process.exit(1);
+  }
+  const methods = {
+    registration: config.registration,
+    passkey: config.auth.passkey,
+    email: mailer !== undefined,
+    social: Object.keys(config.auth.social),
+    oidc: config.auth.oidc.map((p) => p.id),
+  };
+  logger.info("sign-in methods", methods);
 
   const pwaFound = fs.existsSync(config.pwaDir);
   if (!pwaFound) logger.warn("PWA_DIR does not exist; serving the API only", { pwaDir: config.pwaDir });
@@ -46,12 +107,14 @@ function main(): void {
   const wudict = new WudictClient({ baseUrl: config.wudictUrl, token: config.authToken });
   const app = createApp({
     version,
+    config,
     logger,
     db,
+    auth,
+    emailEnabled: mailer !== undefined,
     wudict,
     access: new WudictCatalog({ client: wudict }),
     ...(pwaFound ? { pwaDir: config.pwaDir } : {}),
-    hsts: config.publicUrl.protocol === "https:",
   });
 
   const server = serve(
@@ -94,4 +157,4 @@ function main(): void {
   process.on("SIGINT", shutdown);
 }
 
-main();
+void main();

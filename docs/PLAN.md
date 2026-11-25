@@ -56,7 +56,7 @@ rateLimit(id, key, count, lastRequest)                      -- storage: "databas
 `user_id` columns reference `user.id`):
 
 ```sql
-invites(code_hash, created_by, role, expires_at, used_by, used_at)           -- REGISTRATION=invite
+invites(id, code_hash UNIQUE, created_by, role, note, expires_at, used_at, used_by, created_at)  -- REGISTRATION=invite
 
 user_settings(user_id PRIMARY KEY, history_enabled, history_retention_days, default_mode, ui_lang, theme)
 search_history(id, user_id, query, mode, dict_ids_json, created_at)          -- index (user_id, created_at)
@@ -100,7 +100,7 @@ audit_log(id, actor_user_id, action, target_type, target_id, details_json, bytes
 | Group | Endpoints | Access |
 |---|---|---|
 | Auth (Better Auth, `/app-api/auth/*`) | sign-in/sign-up (email, username), social + OIDC callbacks, passkeys, magic link, email OTP, two-factor, sessions list/revoke, change password, admin user management. Endpoint shapes are Better Auth's | public / user / admin |
-| Auth (PXDict) | `GET /auth/methods` (enabled sign-in methods + registration mode, for the login screen), `GET /me` (user + role + settings summary) | public / user |
+| Auth (PXDict) | `GET /auth/methods` (enabled sign-in methods + registration mode, for the login screen), `POST /auth/invite {code}` (remember an invite code for the next sign-up), `GET /me` (user + role + settings summary) | public / user |
 | History | `GET /me/history?cursor=`, `DELETE /me/history/{id}`, `DELETE /me/history` | user |
 | Settings | `GET/PUT /me/settings` | user |
 | My dictionaries | `GET /me/dicts` (allowed list + enabled + order), `PUT /me/dicts` | user |
@@ -228,30 +228,32 @@ users. Every route except the login page, static assets, `/healthz`, `GET /app-a
 Better Auth's public endpoints requires a session.
 
 **Better Auth setup (`gateway/src/auth/`)**
-- [ ] Better Auth with the Drizzle adapter on `pxdict.db`; generate its schema with the Better Auth CLI and add it as a migration. `basePath: "/app-api/auth"`, `baseURL = PUBLIC_URL`, `trustedOrigins = [PUBLIC_URL]`, secret `BETTER_AUTH_SECRET` (required, ≥ 32 chars; the entrypoint generates and persists one under `/data/gateway/` if unset).
-- [ ] Sessions: cookie prefix `pxdict`, `HttpOnly`, `Secure` per `COOKIE_SECURE`, `SameSite=Lax`, 30-day sliding expiry (suits installed PWAs), cookie cache for fewer DB reads.
-- [ ] Rate limiting: Better Auth limiter with `storage: "database"`, stricter rules for sign-in, sign-up, password reset, magic link and OTP sending.
-- [ ] Origin-check middleware for PXDict's own state-changing `/app-api` routes (same rule as Better Auth: `Origin` ∈ `trustedOrigins`, or `Sec-Fetch-Site: same-origin`).
-- [ ] Guards: `requireUser`, `requireAdmin` (Hono middleware using `auth.api.getSession`), user in context; banned users are rejected.
+- [x] Better Auth with the Drizzle adapter on `pxdict.db`; generate its schema with the Better Auth CLI and add it as a migration. `basePath: "/app-api/auth"`, `baseURL = PUBLIC_URL`, `trustedOrigins = [PUBLIC_URL]`, secret `BETTER_AUTH_SECRET` (required, ≥ 32 chars; the entrypoint generates and persists one under `/data/gateway/` if unset).
+- [x] Sessions: cookie prefix `pxdict`, `HttpOnly`, `Secure` per `COOKIE_SECURE`, `SameSite=Lax`, 30-day sliding expiry (suits installed PWAs), cookie cache for fewer DB reads (60 s; admin routes always read the database, [ADR 0005](adr/0005-authentication-details.md)).
+- [x] Rate limiting: Better Auth limiter with `storage: "database"`, stricter rules for sign-in, sign-up, password reset, magic link and OTP sending. The client address comes from the gateway (TCP peer or `CLIENT_IP_HEADER`), not from client headers.
+- [x] Origin-check middleware for PXDict's own state-changing `/app-api` routes (same rule as Better Auth: `Origin` ∈ `trustedOrigins`, or `Sec-Fetch-Site: same-origin`); it also runs in front of Better Auth's routes, which check only requests with cookies (login CSRF), except the OAuth callback.
+- [x] Guards: `requireUser`, `requireAdmin` (Hono middleware using `auth.api.getSession`), user in context; banned users are rejected.
 
 **Sign-in methods** (each enabled by env; `GET /app-api/auth/methods` tells the PWA which ones)
-- [ ] Email **or username** + password (`emailAndPassword` + `username` plugin); minimum length + Have I Been Pwned check (`haveibeenpwned` plugin, optional `AUTH_HIBP=1`).
-- [ ] **Passkeys** (`@better-auth/passkey`): register from settings, sign in without a password; `rpID` derived from `PUBLIC_URL`.
-- [ ] **Social providers:** Google, GitHub, Microsoft, Apple, Discord, Facebook, GitLab (each enabled when `AUTH_<PROVIDER>_CLIENT_ID` + `_CLIENT_SECRET` are set).
-- [ ] **Generic OIDC** (`generic-oauth`): one or more providers via `AUTH_OIDC_<NAME>_ISSUER`, `_CLIENT_ID`, `_CLIENT_SECRET`, `_LABEL` (Authentik, Keycloak, Zitadel, Authelia, …).
-- [ ] **Email**: optional SMTP (`SMTP_URL`, `MAIL_FROM`, via `nodemailer`). When set: email verification, password reset by email, **magic link** and **email OTP** sign-in. When unset: these are hidden and password resets are done by an admin.
-- [ ] **Two-factor (TOTP + backup codes)** (`two-factor` plugin), optional per user; `AUTH_REQUIRE_2FA_ADMIN=1` forces it for admins.
-- [ ] Account linking: a social/OIDC sign-in links to an existing user only when the provider reports a verified email matching it; users can link/unlink methods in settings (never remove the last one).
+- [x] Email **or username** + password (`emailAndPassword` + `username` plugin); minimum length + Have I Been Pwned check (`haveibeenpwned` plugin, optional `AUTH_HIBP=1`).
+- [x] **Passkeys** (`@better-auth/passkey`): register from settings, sign in without a password; `rpID` derived from `PUBLIC_URL`; `AUTH_PASSKEY=false` turns them off. Server side done and tested up to the WebAuthn options; the ceremony itself is checked in a browser with the Phase 4 UI.
+- [x] **Social providers:** Google, GitHub, Microsoft, Apple, Discord, Facebook, GitLab (each enabled when `AUTH_<PROVIDER>_CLIENT_ID` + `_CLIENT_SECRET` are set).
+- [x] **Generic OIDC** (`generic-oauth`): one or more providers via `AUTH_OIDC_<NAME>_ISSUER`, `_CLIENT_ID`, `_CLIENT_SECRET`, `_LABEL` (Authentik, Keycloak, Zitadel, Authelia, …).
+- [x] **Email**: optional SMTP (`SMTP_URL`, `MAIL_FROM`, via `nodemailer`). When set: email verification, password reset by email, **magic link** and **email OTP** sign-in. When unset: these are hidden and password resets are done by an admin.
+- [x] **Two-factor (TOTP + backup codes)** (`two-factor` plugin), optional per user; `AUTH_REQUIRE_2FA_ADMIN=1` forces it for admins.
+- [x] Account linking: a social/OIDC sign-in links to an existing user only when the provider reports a verified email matching it; users can link/unlink methods in settings (never remove the last one).
 
 **Registration & admin**
-- [ ] Registration modes applied to **every** method (database hook on user creation): `closed` (admins create users), `invite` (single-use, expiring codes in `invites`, passed through sign-up or the OAuth state), `open` (rate-limited).
-- [ ] Admin bootstrap: if no admin exists, create one from `ADMIN_EMAIL` (+ optional `ADMIN_USERNAME`) + `ADMIN_PASSWORD`, or print a one-time random password to the log. Rescue CLI: `node pxdict-gateway.mjs user reset-password <email|username>`.
-- [ ] Admin (`admin` plugin): list/search users, create, change role, ban/unban (revokes sessions), reset password, revoke sessions, impersonate (audited), delete (removes history and favorites; proposals reassigned to admin or deleted — ask at delete time).
-- [ ] The last admin cannot demote, ban or delete themselves.
-- [ ] `audit_log` for every admin action and for bursts of failed sign-ins (Better Auth hooks).
-- [ ] Tests: each enabled method's happy path (OAuth/OIDC against a mocked provider), wrong password, rate limiting, origin check, registration modes, banned users, admin authorization, expired sessions.
+- [x] Registration modes applied to **every** method (database hook on user creation): `closed` (admins create users), `invite` (single-use, expiring codes in `invites`, handed over in a short-lived cookie by `POST /app-api/auth/invite` so every method works the same, [ADR 0005](adr/0005-authentication-details.md)), `open` (rate-limited).
+- [x] Admin bootstrap: if no admin exists, create one from `ADMIN_EMAIL` (+ optional `ADMIN_USERNAME`) + `ADMIN_PASSWORD`, or print a one-time random password to the log. Rescue CLI: `node pxdict-gateway.mjs user reset-password <email|username>`.
+- [x] Admin (`admin` plugin): list/search users, create, change role, ban/unban (revokes sessions), reset password, revoke sessions, impersonate (audited), delete (removes history and favorites; proposals reassigned to admin or deleted — ask at delete time). Sessions, accounts, passkeys and 2FA go with the user; later per-user tables must cascade on `user.id`, and the proposal question is asked once proposals exist (Phase 6).
+- [x] The last admin cannot demote, ban or delete themselves.
+- [x] `audit_log` for every admin action and for bursts of failed sign-ins (Better Auth hooks).
+- [x] Tests: each enabled method's happy path (OAuth/OIDC against a mocked provider), wrong password, rate limiting, origin check, registration modes, banned users, admin authorization, expired sessions. (OIDC against a local mock provider; GitHub through a stubbed `fetch`.)
 
 **Done when:** the smoke test confirms `/api/search` returns 401 without a session and 200 after sign-in; a regular user gets 403 on `/app-api/admin/*`; password, passkey and one OIDC provider sign-in work in a browser.
+The first two are in `scripts/smoke-test.sh`; browser sign-in needs the Phase 4 login screen (password
+and OIDC are covered end to end by the gateway tests, passkeys only up to the WebAuthn options).
 
 ---
 

@@ -1,7 +1,7 @@
 // Serves the built PWA from PWA_DIR: files as they are (with precompressed .br/.gz variants when the
 // build made them), index.html for client-side routes, and 404 for wuDict/gateway paths.
 import { serveStatic } from "@hono/node-server/serve-static";
-import type { Hono, MiddlewareHandler } from "hono";
+import type { Env, Hono, MiddlewareHandler } from "hono";
 import { isReservedPath } from "../wudict/routes";
 
 /** Files that must be revalidated on every load so a new deployment is picked up. */
@@ -12,7 +12,7 @@ const immutable = "public, max-age=31536000, immutable";
 const compressible = /\.(?:html|js|mjs|css|svg|json|webmanifest|txt|xml|wasm)$/;
 
 /** Registers the static routes; call after every API route so those take precedence. */
-export function mountPwa(app: Hono, pwaDir: string): void {
+export function mountPwa<E extends Env>(app: Hono<E>, pwaDir: string): void {
   const files = serveStatic({ root: pwaDir, precompressed: true });
   const index = serveStatic({ root: pwaDir, path: "index.html", precompressed: true });
 

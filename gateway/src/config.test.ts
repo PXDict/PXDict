@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig, parseByteSize, parseListenAddress } from "./config";
 
 const token = "t".repeat(32);
-const load = (env: Record<string, string>) => loadConfig({ AUTH_TOKEN: token, ...env });
+const secret = "s".repeat(32);
+const load = (env: Record<string, string>) => loadConfig({ AUTH_TOKEN: token, BETTER_AUTH_SECRET: secret, ...env });
 
 function issuesOf(fn: () => unknown): string[] {
   try {
@@ -32,6 +33,17 @@ describe("loadConfig", () => {
     expect(c.maxPendingBytes).toBe(5e9);
     expect(c.minFreeBytes).toBe(1e9);
     expect(c.historyDefaultRetentionDays).toBe(90);
+    expect(c.auth).toEqual({
+      secret,
+      bootstrapAdmin: undefined,
+      passkey: true,
+      hibp: false,
+      requireAdmin2fa: false,
+      smtp: undefined,
+      social: {},
+      oidc: [],
+      clientIpHeader: undefined,
+    });
   });
 
   it("treats blank values as unset and normalises paths", () => {
@@ -105,23 +117,95 @@ describe("loadConfig", () => {
     expect(() => load({ [key]: value })).toThrow(ConfigError);
   });
 
-  it("requires AUTH_TOKEN and never echoes it", () => {
+  it("requires AUTH_TOKEN and BETTER_AUTH_SECRET and never echoes them", () => {
     const missing = issuesOf(() => loadConfig({}));
-    expect(missing).toHaveLength(1);
+    expect(missing).toHaveLength(2);
     expect(missing[0]).toMatch(/^AUTH_TOKEN=\(hidden\): /);
+    expect(missing[1]).toMatch(/^BETTER_AUTH_SECRET=\(hidden\): /);
 
-    const short = issuesOf(() => loadConfig({ AUTH_TOKEN: "short-secret" }));
+    const short = issuesOf(() => loadConfig({ AUTH_TOKEN: "short-secret", BETTER_AUTH_SECRET: "short-too" }));
     expect(short.join("\n")).not.toContain("short-secret");
+    expect(short.join("\n")).not.toContain("short-too");
 
-    const spaced = issuesOf(() => loadConfig({ AUTH_TOKEN: "a b".repeat(20) }));
+    const spaced = issuesOf(() => loadConfig({ AUTH_TOKEN: "a b".repeat(20), BETTER_AUTH_SECRET: secret }));
     expect(spaced[0]).toMatch(/^AUTH_TOKEN=\(hidden\): /);
+  });
+
+  it("reads the sign-in settings", () => {
+    const c = load({
+      ADMIN_EMAIL: "Root@Example.com",
+      ADMIN_USERNAME: "Root",
+      ADMIN_PASSWORD: "long enough password",
+      AUTH_PASSKEY: "false",
+      AUTH_HIBP: "1",
+      AUTH_REQUIRE_2FA_ADMIN: "true",
+      SMTP_URL: "smtps://u:p@mail.example.com:465",
+      MAIL_FROM: "PXDict <dict@example.com>",
+      CLIENT_IP_HEADER: "CF-Connecting-IP",
+      AUTH_GITHUB_CLIENT_ID: "gh-id",
+      AUTH_GITHUB_CLIENT_SECRET: "gh-secret",
+      AUTH_MICROSOFT_CLIENT_ID: "ms-id",
+      AUTH_MICROSOFT_CLIENT_SECRET: "ms-secret",
+      AUTH_MICROSOFT_TENANT_ID: "contoso",
+      AUTH_OIDC_KEYCLOAK_ISSUER: "https://sso.example.com/realms/home",
+      AUTH_OIDC_KEYCLOAK_CLIENT_ID: "kc-id",
+      AUTH_OIDC_KEYCLOAK_CLIENT_SECRET: "kc-secret",
+      AUTH_OIDC_KEYCLOAK_LABEL: "Home SSO",
+    });
+    expect(c.auth.bootstrapAdmin).toEqual({ email: "root@example.com", username: "root", password: "long enough password" });
+    expect(c.auth.passkey).toBe(false);
+    expect(c.auth.hibp).toBe(true);
+    expect(c.auth.requireAdmin2fa).toBe(true);
+    expect(c.auth.smtp).toEqual({ url: "smtps://u:p@mail.example.com:465", from: "PXDict <dict@example.com>" });
+    expect(c.auth.clientIpHeader).toBe("cf-connecting-ip");
+    expect(c.auth.social).toEqual({
+      github: { clientId: "gh-id", clientSecret: "gh-secret" },
+      microsoft: { clientId: "ms-id", clientSecret: "ms-secret", tenantId: "contoso" },
+    });
+    expect(c.auth.oidc).toEqual([
+      {
+        id: "keycloak",
+        label: "Home SSO",
+        issuer: new URL("https://sso.example.com/realms/home"),
+        clientId: "kc-id",
+        clientSecret: "kc-secret",
+      },
+    ]);
+  });
+
+  it.each([
+    [{ ADMIN_EMAIL: "not-an-email" }, "ADMIN_EMAIL"],
+    [{ ADMIN_PASSWORD: "long enough password" }, "ADMIN_EMAIL"],
+    [{ ADMIN_EMAIL: "a@example.com", ADMIN_PASSWORD: "short" }, "ADMIN_PASSWORD"],
+    [{ ADMIN_EMAIL: "a@example.com", ADMIN_USERNAME: "no spaces" }, "ADMIN_USERNAME"],
+    [{ AUTH_HIBP: "yes" }, "AUTH_HIBP"],
+    [{ SMTP_URL: "http://mail.example.com" }, "SMTP_URL"],
+    [{ SMTP_URL: "smtp://mail.example.com" }, "MAIL_FROM"],
+    [{ CLIENT_IP_HEADER: "x forwarded" }, "CLIENT_IP_HEADER"],
+    [{ AUTH_GOOGLE_CLIENT_ID: "id" }, "AUTH_GOOGLE_CLIENT_SECRET"],
+    [{ AUTH_OIDC_SSO_ISSUER: "https://sso.example.com" }, "AUTH_OIDC_SSO_CLIENT_ID"],
+    [{ AUTH_OIDC_SSO_ISSUER: "sso.example.com", AUTH_OIDC_SSO_CLIENT_ID: "i", AUTH_OIDC_SSO_CLIENT_SECRET: "s" }, "AUTH_OIDC_SSO_ISSUER"],
+    [{ AUTH_OIDC_GITHUB_ISSUER: "https://x.example", AUTH_OIDC_GITHUB_CLIENT_ID: "i", AUTH_OIDC_GITHUB_CLIENT_SECRET: "s" }, "AUTH_OIDC_GITHUB_ISSUER"],
+    [{ AUTH_OIDC_my_ISSUER: "https://x.example" }, "AUTH_OIDC_my_ISSUER"],
+  ])("rejects %j (reported as %s)", (env, key) => {
+    const issues = issuesOf(() => load(env));
+    expect(issues.map((i) => i.split(/[=:]/)[0])).toContain(key);
+  });
+
+  it("never echoes passwords or client secrets", () => {
+    const issues = issuesOf(() =>
+      load({ ADMIN_EMAIL: "a@example.com", ADMIN_PASSWORD: "tiny", AUTH_GITHUB_CLIENT_SECRET: "gh-very-secret" }),
+    );
+    const text = issues.join("\n");
+    expect(text).not.toContain("tiny");
+    expect(text).not.toContain("gh-very-secret");
   });
 
   it("reports every problem at once", () => {
     const keys = issuesOf(() => loadConfig({ LISTEN_ADDR: "x", DATA_DIR: "rel", LOG_LEVEL: "loud" })).map(
       (i) => i.split("=")[0],
     );
-    expect(keys.sort()).toEqual(["AUTH_TOKEN", "DATA_DIR", "LISTEN_ADDR", "LOG_LEVEL"]);
+    expect(keys.sort()).toEqual(["AUTH_TOKEN", "BETTER_AUTH_SECRET", "DATA_DIR", "LISTEN_ADDR", "LOG_LEVEL"]);
   });
 });
 

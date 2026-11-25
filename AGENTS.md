@@ -208,10 +208,14 @@ them, say so and why.
   `SameSite=Lax` cookie signed with `BETTER_AUTH_SECRET`. Better Auth stores session tokens unhashed, so
   `pxdict.db` and its backups are secrets ([ADR 0004](docs/adr/0004-typescript-gateway-better-auth.md)).
 - State-changing requests (`POST/PUT/PATCH/DELETE` on `/app-api`) must pass the **origin check**:
-  `Origin` equal to `PUBLIC_URL`'s origin (or, without `Origin`, `Sec-Fetch-Site: same-origin`). Better
-  Auth enforces this on its routes via `trustedOrigins`; PXDict routes use the same middleware.
+  `Origin` equal to `PUBLIC_URL`'s origin (or, without `Origin`, `Sec-Fetch-Site: same-origin`). The
+  gateway's middleware (`http/origin.ts`) runs on PXDict's routes **and** in front of Better Auth's, since
+  Better Auth checks only requests that carry cookies; only the OAuth callback is exempt
+  ([ADR 0005](docs/adr/0005-authentication-details.md)).
 - Rate-limit sign-in, sign-up, password reset and email sending (Better Auth's limiter, stored in the
-  database so it survives restarts). Sign-in errors never reveal whether an account exists.
+  database so it survives restarts). The client address comes from the gateway (TCP peer, or
+  `CLIENT_IP_HEADER` behind a trusted proxy), never from a header the client chose. Sign-in errors
+  never reveal whether an account exists.
 - OAuth/OIDC providers are enabled only by configuration; accounts are linked to an existing user only
   through verified emails. Registration policy (closed / invite / open) applies to **every** sign-in
   method, including the first social or OIDC sign-in.
