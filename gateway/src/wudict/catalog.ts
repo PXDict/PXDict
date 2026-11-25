@@ -1,20 +1,41 @@
-// Which wuDict dictionaries a request may use. The proxy always sends wuDict an explicit `dict=` list
-// built from this (never `all`), and filters /api/dicts with it.
-//
-// Until Phase 5 every signed-in user may use every dictionary wuDict lists except its builtin howto, and
-// no dictionary is trusted. Phase 5 replaces WudictCatalog with the gateway's `dictionaries` +
-// `user_dicts` tables.
+// wuDict's dictionary list as the gateway sees it, cached and refreshed cheaply with the etag of the
+// stream's end line. dicts/registry.ts reconciles it with the gateway's `dictionaries` table, and the
+// proxy decides per user from that table (DictAccess).
+import path from "node:path";
 import type { WudictClient } from "./client";
-import { isBuiltinDict } from "./sanitize";
+import { isBuiltinDict, type DictLabel } from "./sanitize";
+
+/** What one user may use, keyed by wuDict's current ids. */
+export interface UserDictView {
+  /** Every dictionary the user may use (wuDict id → PXDict data), in the user's order. */
+  usable: ReadonlyMap<string, UsableDict>;
+  /** wuDict ids of the user's enabled dictionaries, in the user's order: the default search set. */
+  enabled: readonly string[];
+}
+
+/** PXDict's stable id and title, the user's enabled flag, and `trusted_render` (style A allowed). */
+export type UsableDict = DictLabel;
 
 export interface DictAccess {
-  /** wuDict ids `userId` may use, in the order results should be shown. */
-  allowedIds(userId: string, signal?: AbortSignal): Promise<string[]>;
-  /**
-   * wuDict ids an admin marked `trusted_render`: the PWA may render them same-origin (style A) instead
-   * of in an opaque-origin sandbox.
-   */
-  trustedIds(signal?: AbortSignal): Promise<ReadonlySet<string>>;
+  /** The dictionaries `userId` may use. Throws WudictCatalogError etc. when wuDict cannot be asked. */
+  forUser(userId: string, signal?: AbortSignal): Promise<UserDictView>;
+}
+
+/** One /api/dicts row, reduced to what the gateway needs (paths stay inside the gateway). */
+export interface WudictDictRow {
+  id: string;
+  name: string;
+  format: string | undefined;
+  /** Folder name under DB_DIR (`db/<name>/`), once indexed. */
+  libraryDir: string | undefined;
+  /** Absolute path of the original file, while it exists. */
+  sourcePath: string | undefined;
+}
+
+export interface CatalogSnapshot {
+  rows: readonly WudictDictRow[];
+  /** Changes whenever the listing changes; equal versions have equal rows. */
+  version: number;
 }
 
 /** wuDict answered /api/dicts with something other than 200/304. */
@@ -34,20 +55,20 @@ export interface WudictCatalogOptions {
   now?: () => number;
 }
 
-interface Snapshot {
-  ids: string[];
+interface Snapshot extends CatalogSnapshot {
   etag: string | undefined;
   fetchedAt: number;
 }
 
 /** Caches wuDict's dictionary list; refreshes cheaply through the `etag` of the stream's end line. */
-export class WudictCatalog implements DictAccess {
+export class WudictCatalog {
   readonly #client: WudictClient;
   readonly #ttlMs: number;
   readonly #maxBytes: number;
   readonly #now: () => number;
   #snapshot: Snapshot | undefined;
   #refreshing: Promise<Snapshot> | undefined;
+  #version = 0;
 
   constructor(opts: WudictCatalogOptions) {
     this.#client = opts.client;
@@ -56,18 +77,15 @@ export class WudictCatalog implements DictAccess {
     this.#now = opts.now ?? Date.now;
   }
 
-  trustedIds(): Promise<ReadonlySet<string>> {
-    return Promise.resolve(new Set());
-  }
-
-  async allowedIds(): Promise<string[]> {
+  /** The current listing (from the cache while it is fresh). */
+  async snapshot(): Promise<CatalogSnapshot> {
     const snap = this.#snapshot;
-    if (snap && this.#now() - snap.fetchedAt < this.#ttlMs) return snap.ids;
+    if (snap && this.#now() - snap.fetchedAt < this.#ttlMs) return snap;
     // One refresh at a time; concurrent callers share it. It is not tied to any caller's signal.
     this.#refreshing ??= this.#refresh(snap).finally(() => {
       this.#refreshing = undefined;
     });
-    return (await this.#refreshing).ids;
+    return await this.#refreshing;
   }
 
   /** Forgets the cached list (after a rescan, an approval, …). */
@@ -94,21 +112,43 @@ export class WudictCatalog implements DictAccess {
     }
 
     const text = await readLimited(res, this.#maxBytes);
-    const ids: string[] = [];
+    const rows: WudictDictRow[] = [];
     let etag: string | undefined;
     for (const raw of text.split("\n")) {
       if (!raw.trim()) continue;
-      const line = JSON.parse(raw) as { t?: unknown; dict?: { id?: unknown }; etag?: unknown };
-      if (line.t === "dict" && line.dict && typeof line.dict.id === "string" && !isBuiltinDict(line.dict)) {
-        ids.push(line.dict.id);
+      const line = JSON.parse(raw) as { t?: unknown; dict?: Record<string, unknown>; etag?: unknown };
+      if (line.t === "dict" && line.dict && !isBuiltinDict(line.dict)) {
+        const row = toRow(line.dict);
+        if (row) rows.push(row);
       } else if (line.t === "end" && typeof line.etag === "string") {
         etag = line.etag;
       }
     }
-    // wuDict streams rows in completion order; keep a stable order for search results.
-    ids.sort();
-    return (this.#snapshot = { ids, etag, fetchedAt: this.#now() });
+    // wuDict streams rows in completion order; keep a stable order.
+    rows.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const same = previous && JSON.stringify(previous.rows) === JSON.stringify(rows);
+    const version = same ? previous.version : ++this.#version;
+    return (this.#snapshot = { rows, version, etag, fetchedAt: this.#now() });
   }
+}
+
+const str = (v: unknown) => (typeof v === "string" && v !== "" ? v : undefined);
+
+/** Reads the fields the gateway needs from one DictInfo (docs/wudict-notes.md Q6). */
+function toRow(d: Record<string, unknown>): WudictDictRow | undefined {
+  const id = str(d.id);
+  if (!id) return undefined;
+  // `folder` is db/<name>; `dbPath` is db/<name>/text.db; both are absent until indexed.
+  const folder = str(d.folder) ?? (str(d.dbPath) ? path.posix.dirname(str(d.dbPath) ?? "") : undefined);
+  // `source` is the original file while it exists; `path` is the source, or text.db once originals are gone.
+  const sourcePath = str(d.source) ?? (str(d.dbPath) ? undefined : str(d.path));
+  return {
+    id,
+    name: str(d.name) ?? id,
+    format: str(d.format),
+    libraryDir: folder ? path.posix.basename(folder) : undefined,
+    sourcePath,
+  };
 }
 
 async function readLimited(res: Response, maxBytes: number): Promise<string> {

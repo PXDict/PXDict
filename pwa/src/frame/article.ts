@@ -39,21 +39,25 @@ export interface ArticleOptions {
   body: string;
   theme: "light" | "dark";
   lang: string;
+  /** Text size factor (the user's font size setting); 1 by default. */
+  fontScale?: number;
 }
 
-const baseCss = (theme: "light" | "dark") => `
+const baseCss = (theme: "light" | "dark", scale: number) => `
 :root{color-scheme:${theme}}
 html,body{margin:0;padding:0;background:transparent}
-body{font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:${theme === "dark" ? "#e6e9ed" : "#1b1f24"};overflow-wrap:anywhere;padding:2px 0}
+body{font:${String(Math.round(16 * scale * 100) / 100)}px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:${theme === "dark" ? "#e6e9ed" : "#1b1f24"};overflow-wrap:anywhere;padding:2px 0}
 img,video{max-width:100%;height:auto}
 a{color:${theme === "dark" ? "#7cb4ff" : "#0b5cd5"}}`;
 
 const escapeAttr = (s: string) => s.replace(/[&"<>]/g, (c) => `&#${String(c.charCodeAt(0))};`);
 
 /** The document posted into /frame.html for one article. */
-export function articleDocument({ body, theme, lang }: ArticleOptions): string {
+export function articleDocument({ body, theme, lang, fontScale = 1 }: ArticleOptions): string {
+  // A number from the settings, but it ends up in CSS: never anything else.
+  const scale = Number.isFinite(fontScale) && fontScale > 0.5 && fontScale < 3 ? fontScale : 1;
   return `<!doctype html><html lang="${escapeAttr(lang)}"><head><meta charset="utf-8">` +
-    `<meta name="viewport" content="width=device-width,initial-scale=1"><style>${baseCss(theme)}</style>` +
+    `<meta name="viewport" content="width=device-width,initial-scale=1"><style>${baseCss(theme, scale)}</style>` +
     `<script>${runtime}</script></head><body>${body}</body></html>`;
 }
 

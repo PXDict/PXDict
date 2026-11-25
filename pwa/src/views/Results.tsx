@@ -8,6 +8,7 @@ import { errorMessage } from "../lib/errors";
 import { applyLine, emptySearch, type SearchState, type Slot } from "../lib/results";
 import { ArticleFrame } from "./ArticleFrame";
 import { Notice } from "./Field";
+import { favoriteKey } from "./SearchView";
 
 /** Articles shown per dictionary before "show more". */
 const initialArticles = 5;
@@ -18,11 +19,14 @@ export interface ResultsProps {
   /** Restrict to these dictionaries (e.g. "search only this dictionary"). */
   only?: string;
   dicts: ReadonlyMap<string, GatewayDict>;
+  /** Saved words (favoriteKey); null while unknown (offline), which hides the save buttons. */
+  saved: ReadonlySet<string> | null;
+  onToggleSaved: (dictId: string, headword: string) => void;
   onLookup: (word: string) => void;
   onOnly: (dict: string) => void;
 }
 
-export function Results({ q, mode, only, dicts, onLookup, onOnly }: ResultsProps) {
+export function Results({ q, mode, only, dicts, saved, onToggleSaved, onLookup, onOnly }: ResultsProps) {
   const [state, setState] = useState<SearchState>(emptySearch);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,7 +66,15 @@ export function Results({ q, mode, only, dicts, onLookup, onOnly }: ResultsProps
         <p class="muted">{t("results.lemma", { from: state.morph.from, to: state.morph.to })}</p>
       )}
       {found.map((slot) => (
-        <DictSection key={slot.dict} slot={slot} trusted={dicts.get(slot.dict)?.trustedRender === true} onLookup={onLookup} />
+        <DictSection
+          key={slot.dict}
+          slot={slot}
+          trusted={dicts.get(slot.dict)?.trustedRender === true}
+          dictId={dicts.get(slot.dict)?.dictId}
+          saved={saved}
+          onToggleSaved={onToggleSaved}
+          onLookup={onLookup}
+        />
       ))}
       {pending.length > 0 && (
         <p class="muted" role="status">
@@ -91,7 +103,17 @@ export function Results({ q, mode, only, dicts, onLookup, onOnly }: ResultsProps
   );
 }
 
-function DictSection({ slot, trusted, onLookup }: { slot: Slot; trusted: boolean; onLookup: (w: string) => void }) {
+interface DictSectionProps {
+  slot: Slot;
+  trusted: boolean;
+  /** PXDict's id of this dictionary; unknown offline. */
+  dictId: string | undefined;
+  saved: ReadonlySet<string> | null;
+  onToggleSaved: (dictId: string, headword: string) => void;
+  onLookup: (w: string) => void;
+}
+
+function DictSection({ slot, trusted, dictId, saved, onToggleSaved, onLookup }: DictSectionProps) {
   const [all, setAll] = useState(false);
   const shown = all ? slot.results : slot.results.slice(0, initialArticles);
   return (
@@ -102,7 +124,20 @@ function DictSection({ slot, trusted, onLookup }: { slot: Slot; trusted: boolean
       </summary>
       {shown.map((r, i) => (
         <article key={`${String(i)}:${r.Headword ?? ""}`} class="entry">
-          {r.Headword && <h3 class="headword">{r.Headword}</h3>}
+          {r.Headword && (
+            <h3 class="headword">
+              {r.Headword}
+              {dictId && saved && (
+                <SaveButton
+                  on={saved.has(favoriteKey(dictId, r.Headword))}
+                  word={r.Headword}
+                  onClick={() => {
+                    if (r.Headword) onToggleSaved(dictId, r.Headword);
+                  }}
+                />
+              )}
+            </h3>
+          )}
           <ArticleFrame
             key={r.Body}
             body={r.Body ?? ""}
@@ -118,5 +153,20 @@ function DictSection({ slot, trusted, onLookup }: { slot: Slot; trusted: boolean
         </button>
       )}
     </details>
+  );
+}
+
+function SaveButton({ on, word, onClick }: { on: boolean; word: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      class={on ? "star on" : "star"}
+      aria-pressed={on}
+      aria-label={t(on ? "favorites.unsave" : "favorites.save", { word })}
+      title={t(on ? "favorites.unsave" : "favorites.save", { word })}
+      onClick={onClick}
+    >
+      {on ? "★" : "☆"}
+    </button>
   );
 }

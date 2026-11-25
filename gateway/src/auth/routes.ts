@@ -1,5 +1,5 @@
 // PXDict's own account endpoints next to Better Auth's: the login screen's method list, invite codes,
-// /me and admin invite management. Better Auth's endpoints are mounted by app.ts.
+// and admin invite management. Better Auth's endpoints are mounted by app.ts; /app-api/me is in me/routes.ts.
 import {
   AuthMethods,
   ClaimInviteRequest,
@@ -8,17 +8,16 @@ import {
   type CreateInviteResponse,
   type Invite as InviteDto,
   type InviteList,
-  type Me,
 } from "@pxdict/shared";
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { setCookie } from "hono/cookie";
-import type { z } from "zod";
 import { recordAudit } from "../audit/audit";
 import { minPasswordLength, socialProviderIds, type Config, type SocialProviderId } from "../config";
 import type { Db } from "../db/client";
+import { readJson } from "../http/body";
 import { jsonError } from "../http/errors";
 import { originCheck } from "../http/origin";
-import { authBasePath, hasAdminRole } from "./auth";
+import { authBasePath } from "./auth";
 import type { AuthEnv, Guards } from "./guards";
 import {
   createInvite,
@@ -76,18 +75,6 @@ function inviteDto(i: Invite, now = new Date()): InviteDto {
   };
 }
 
-/** Parses a JSON body with a shared schema; undefined (after answering 400) when invalid. */
-async function readJson<S extends z.ZodType>(c: Context, schema: S): Promise<z.infer<S> | undefined> {
-  let raw: unknown;
-  try {
-    raw = await c.req.json();
-  } catch {
-    return undefined;
-  }
-  const result = schema.safeParse(raw);
-  return result.success ? result.data : undefined;
-}
-
 export interface AuthRoutesOptions {
   config: Config;
   db: Db;
@@ -119,30 +106,6 @@ export function createAuthRoutes({ config, db, guards, emailEnabled }: AuthRoute
     });
     c.header("Cache-Control", "no-store");
     return c.body(null, 204);
-  });
-
-  app.get("/app-api/me", guards.requireUser, (c) => {
-    const { user, session } = c.get("session");
-    c.header("Cache-Control", "no-store");
-    return c.json({
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        emailVerified: user.emailVerified,
-        username: user.username ?? null,
-        displayUsername: user.displayUsername ?? null,
-        image: user.image ?? null,
-        role: hasAdminRole(user.role) ? "admin" : "user",
-        twoFactorEnabled: user.twoFactorEnabled ?? false,
-        createdAt: new Date(user.createdAt).toISOString(),
-      },
-      session: {
-        id: session.id,
-        expiresAt: new Date(session.expiresAt).toISOString(),
-        impersonatedBy: session.impersonatedBy ?? null,
-      },
-    } satisfies Me);
   });
 
   // Every /app-api/admin/* path, including unknown ones, needs an admin: a regular user gets 403.

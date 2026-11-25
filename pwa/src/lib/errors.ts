@@ -30,6 +30,8 @@ const known: Record<string, MessageKey> = {
   invalid_token: "error.invalidToken",
   credential_account_not_found: "error.noPassword",
   failed_to_unlink_last_account: "error.lastAccount",
+  unknown_dict: "error.unknownDict",
+  too_many_favorites: "error.tooManyFavorites",
 };
 
 export function errorMessage(err: unknown): string {

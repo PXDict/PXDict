@@ -58,9 +58,11 @@ rateLimit(id, key, count, lastRequest)                      -- storage: "databas
 ```sql
 invites(id, code_hash UNIQUE, created_by, role, note, expires_at, used_at, used_by, created_at)  -- REGISTRATION=invite
 
-user_settings(user_id PRIMARY KEY, history_enabled, history_retention_days, default_mode, ui_lang, theme)
-search_history(id, user_id, query, mode, dict_ids_json, created_at)          -- index (user_id, created_at)
-favorites(user_id, headword, dict_id, note, created_at, PRIMARY KEY(user_id, headword, dict_id))
+user_settings(user_id PRIMARY KEY, history_enabled, history_retention_days /* 0 = forever */,
+              default_mode, ui_lang /* NULL = device */, theme, font_size, updated_at)
+search_history(id, user_id, query, mode, dict_ids_json /* PXDict ids, NULL = enabled set */, created_at)
+                                                                              -- index (user_id, created_at)
+favorites(user_id, headword, dict_id, note, created_at, updated_at, PRIMARY KEY(user_id, headword, dict_id))
 
 dictionaries(id PRIMARY KEY,           -- PXDict's own stable id (also the folder name under DICT_DIR)
              wudict_id,                -- wuDict's id = sha256(path)[:12]; changes when originals are
@@ -73,7 +75,8 @@ dictionaries(id PRIMARY KEY,           -- PXDict's own stable id (also the folde
              trusted_render BOOLEAN,   -- allows style-A rendering
              source_path, source_bytes, index_bytes, media_packed BOOLEAN, source_deleted_at,
              proposal_id NULL, created_at, updated_at)
-user_dicts(user_id, dict_id, enabled, position, PRIMARY KEY(user_id, dict_id))
+user_dicts(user_id, dict_id, enabled, position, is_new, created_at, PRIMARY KEY(user_id, dict_id))
+                                       -- filled in lazily (ADR 0007)
 
 proposals(id, user_id, title, description, source_url, license_note,
           status CHECK(status IN ('uploading','pending','approved','rejected','withdrawn')),
@@ -100,11 +103,11 @@ audit_log(id, actor_user_id, action, target_type, target_id, details_json, bytes
 | Group | Endpoints | Access |
 |---|---|---|
 | Auth (Better Auth, `/app-api/auth/*`) | sign-in/sign-up (email, username), social + OIDC callbacks, passkeys, magic link, email OTP, two-factor, sessions list/revoke, change password, admin user management. Endpoint shapes are Better Auth's | public / user / admin |
-| Auth (PXDict) | `GET /auth/methods` (enabled sign-in methods + registration mode, for the login screen), `POST /auth/invite {code}` (remember an invite code for the next sign-up), `GET /me` (user + role + settings summary) | public / user |
-| History | `GET /me/history?cursor=`, `DELETE /me/history/{id}`, `DELETE /me/history` | user |
+| Auth (PXDict) | `GET /auth/methods` (enabled sign-in methods + registration mode, for the login screen), `POST /auth/invite {code}` (remember an invite code for the next sign-up), `GET /me` (user + role + settings + new dictionaries) | public / user |
+| History | `GET /me/history?q=&cursor=&limit=&unique=`, `GET /me/history/export?format=csv\|json`, `DELETE /me/history/{id}`, `DELETE /me/history` | user |
 | Settings | `GET/PUT /me/settings` | user |
-| My dictionaries | `GET /me/dicts` (allowed list + enabled + order), `PUT /me/dicts` | user |
-| Favorites | `GET/POST/DELETE /me/favorites` | user |
+| My dictionaries | `GET /me/dicts` (allowed list + enabled + order), `PUT /me/dicts`, `POST /me/dicts/seen` (acknowledge new dictionaries) | user |
+| Favorites | `GET /me/favorites`, `POST /me/favorites {headword, dictId, note?}`, `DELETE /me/favorites?headword=&dict=`, `GET /me/favorites/export?format=csv\|json` | user |
 | Proposals | `POST /proposals` (multipart, size-limited), `GET /me/proposals`, `DELETE /proposals/{id}` (while pending) | user |
 | Admin: users | Better Auth `admin` plugin endpoints (list, create, set role, ban/unban, revoke sessions, set password, impersonate, remove) + PXDict `GET/POST/DELETE /admin/invites` | admin |
 | Admin: proposals | `GET /admin/proposals`, `GET /admin/proposals/{id}`, `POST .../{id}/approve {scope, dict_id, trusted_render}`, `POST .../{id}/reject {note}` | admin |
@@ -117,8 +120,8 @@ Proxying to wuDict (after the session check):
 
 | Path | Gateway behaviour |
 |---|---|
-| `GET /api/dicts` | NDJSON stream. Keep only dictionaries the user may use (`visibility` + `user_dicts.enabled`, ordered by `position`), drop the builtin `wudict-howto`, **strip filesystem fields** (`path`, `dbPath`, `source`, `mediaSrc`, `textDB`, `mediaDB`, `folder`) |
-| `GET /api/search`, `GET /api/suggest` | Always pass an explicit `dict=<id>,<id>,…` (never `all`; wuDict supports it on both). Empty allowed set → answer empty without calling wuDict (an all-unknown list is a wuDict 404). Forward NDJSON lines as they arrive. Log `search_history` (`search` only, if enabled) |
+| `GET /api/dicts` | NDJSON stream. Keep only dictionaries the user may use (`visibility`), add PXDict's `dictId`, title (as `name`), `enabled` and `trustedRender`, drop the builtin `wudict-howto`, **strip filesystem fields** (`path`, `dbPath`, `source`, `mediaSrc`, `textDB`, `mediaDB`, `folder`) |
+| `GET /api/search`, `GET /api/suggest` | Always pass an explicit `dict=<id>,<id>,…` (never `all`; wuDict supports it on both): the user's enabled dictionaries in `position` order, or the requested ones the user may use. Empty set → answer empty without calling wuDict (an all-unknown list is a wuDict 404). Forward NDJSON lines as they arrive, names replaced by PXDict titles. Log `search_history` (`search` only, if enabled) |
 | `GET /res/{dict}/…` | Check the user may access `{dict}`; sandboxed iframes use signed URLs (see Phase 4). wuDict already rewrites every resource reference to absolute `/res/{id}/…`, so the gateway rewrites only that prefix |
 | `/style/*`, `/files/*`, `/assets/*` | **Not proxied**: Phase 0 found entry HTML never references them (wuDict's own UI only) |
 | Everything else (`/setup`, `/api/library…`, `/api/ingest`, `/api/rescan`, …) | **404 for users**; admins only via `/app-api/admin/*` (optional: `/wudict-admin/*` for admins to use the native UI) |
@@ -281,22 +284,23 @@ and OIDC are covered end to end by the gateway tests, passkeys only up to the We
 **Goal:** search history, dictionary selection, favorites, settings — isolated between users.
 
 **Search history**
-- [ ] Gateway logs while proxying `/api/search` (not `suggest`), merging identical consecutive lookups within 1 minute.
-- [ ] Settings: enable/disable history, retention (7/30/90/365 days/forever); periodic cleanup job.
-- [ ] PWA: history page (grouped by day, searchable, tap to look up again), delete one / delete all; suggestions from history when the search box is empty.
-- [ ] Export history (CSV/JSON).
+- [x] Gateway logs while proxying `/api/search` (not `suggest`), merging identical consecutive lookups within 1 minute.
+- [x] Settings: enable/disable history, retention (7/30/90/365 days/forever); periodic cleanup job (hourly; also caps history at 10 000 entries per user).
+- [x] PWA: history page (grouped by day, searchable, tap to look up again), delete one / delete all; suggestions from history when the search box is empty.
+- [x] Export history (CSV/JSON).
 
 **Dictionary selection**
-- [ ] `GET /me/dicts`: all `global` dictionaries + the user's own `private` ones, with `enabled` and `position`. New users: all `global` dictionaries enabled.
-- [ ] PWA: toggle, drag-and-drop ordering; (optional) named "dictionary sets" for quick switching (e.g. English–Vietnamese, Chinese–Vietnamese).
-- [ ] Newly approved `global` dictionaries are added to every user, enabled, at the end; the PWA shows a "new dictionary" notice.
-- [ ] Hidden/deleted dictionaries disappear for every user without errors.
+- [x] `GET /me/dicts`: all `global` dictionaries + the user's own `private` ones, with `enabled` and `position`. New users: all `global` dictionaries enabled. Needs the catalogue sync, which starts here instead of Phase 6 ([ADR 0007](adr/0007-per-user-dictionaries-and-history.md)).
+- [x] PWA: toggle, drag-and-drop ordering (plus up/down buttons for touch and keyboards).
+- [ ] (Optional, deferred) named "dictionary sets" for quick switching (e.g. English–Vietnamese, Chinese–Vietnamese).
+- [x] Newly approved `global` dictionaries are added to every user, enabled, at the end; the PWA shows a "new dictionary" notice.
+- [x] Hidden/deleted dictionaries disappear for every user without errors.
 
 **Favorites & settings**
-- [ ] Per-user favorites (add from results, list, notes, export).
-- [ ] Settings: default search mode, UI language, theme, font size.
+- [x] Per-user favorites (add from results, list, notes, export).
+- [x] Settings: default search mode, UI language, theme, font size.
 
-- [ ] Isolation tests at the HTTP layer: user A never sees user B's history, favorites or private dictionaries.
+- [x] Isolation tests at the HTTP layer: user A never sees user B's history, favorites or private dictionaries.
 
 **Done when:** two users on two devices have different histories and dictionary sets, and the same lookup returns results according to each user's choices.
 
@@ -324,7 +328,7 @@ and OIDC are covered end to end by the gateway tests, passkeys only up to the We
 - [ ] Approve: choose `dict_id`, scope `global` (all users) or `private` (proposer only), `trusted_render` flag (off by default) → move files into `/data/dictionaries/<dict_id>/` (same-filesystem rename), `GET /api/rescan` (new files are not auto-detected), find the row by path, create the `dictionaries` row, **explicitly** `GET /api/ingest?dict=<id>&media=1` (SSE `progress`/`done`/`error`) before users can search it (search-before-index costs ~2.5× the RAM), record `wudict_uuid` from `info.txt`, surface indexing errors.
 - [ ] Reject: record a reason, **delete files immediately** (free disk), keep metadata so the user sees the reason.
 - [ ] Notify the user in the PWA when a proposal is approved/rejected.
-- [ ] Catalogue sync: a "rescan" action reconciles `/data/dictionaries` + `/api/dicts` with the `dictionaries` table (dictionaries copied in manually → `source='builtin'`, `visibility='hidden'` until an admin enables them).
+- [ ] Catalogue sync: a "rescan" action (`GET /api/rescan`) reconciles `/data/dictionaries` + `/api/dicts` with the `dictionaries` table and records `wudict_uuid` from `info.txt`. The sync itself runs since Phase 5 on every listing change: dictionaries copied in manually → `source='builtin'` with `BUILTIN_DICT_VISIBILITY` (`global` by default; `hidden` keeps them back until an admin enables them, [ADR 0007](adr/0007-per-user-dictionaries-and-history.md)).
 
 **Done when:** a user proposes a small MDX → the admin reviews and approves it as `global` → every user sees it and can look words up; a rejected proposal leaves no files on disk.
 

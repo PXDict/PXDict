@@ -58,6 +58,12 @@ export function setLocalePref(locale: Locale): void {
   setLocale(locale);
 }
 
+/** Forgets the locale picked on this device and follows the browser's languages again. */
+export function followDeviceLocale(preferred: readonly string[]): void {
+  writeLocal(prefKey, null);
+  setLocale(negotiateLocale(preferred));
+}
+
 export function getLocale(): Locale {
   return current;
 }

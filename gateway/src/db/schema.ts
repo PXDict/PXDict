@@ -4,7 +4,7 @@
 // entries outlive users. Migrations are generated from both files with
 // `npm run db:generate -w @pxdict/gateway` and are append-only.
 import { sql } from "drizzle-orm";
-import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { check, index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { user } from "./auth-schema";
 
 export * from "./auth-schema";
@@ -90,5 +90,87 @@ export const invites = sqliteTable(
   (t) => [
     index("invites_created_at_idx").on(t.createdAt),
     check("invites_role_check", sql`${t.role} IN ('user', 'admin')`),
+  ],
+);
+
+/** Per-user settings; a user without a row has the defaults (settings/settings.ts). */
+export const userSettings = sqliteTable(
+  "user_settings",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => user.id, { onDelete: "cascade" }),
+    historyEnabled: integer("history_enabled", { mode: "boolean" }).notNull().default(true),
+    /** Days search history is kept; 0 keeps it forever. */
+    historyRetentionDays: integer("history_retention_days").notNull(),
+    defaultMode: text("default_mode", { enum: ["exact", "prefix", "fts", "wildcard"] }).notNull().default("exact"),
+    /** UI language (BCP 47 tag); null follows the device. */
+    uiLang: text("ui_lang"),
+    theme: text("theme", { enum: ["system", "light", "dark"] }).notNull().default("system"),
+    fontSize: text("font_size", { enum: ["small", "medium", "large", "xlarge"] }).notNull().default("medium"),
+    updatedAt: timestamp("updated_at"),
+  },
+  (t) => [
+    check("user_settings_mode_check", sql`${t.defaultMode} IN ('exact', 'prefix', 'fts', 'wildcard')`),
+    check("user_settings_theme_check", sql`${t.theme} IN ('system', 'light', 'dark')`),
+    check("user_settings_font_check", sql`${t.fontSize} IN ('small', 'medium', 'large', 'xlarge')`),
+    check("user_settings_retention_check", sql`${t.historyRetentionDays} >= 0`),
+  ],
+);
+
+/** Lookups logged by the /api/search proxy (history/history.ts). */
+export const searchHistory = sqliteTable(
+  "search_history",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    query: text("query").notNull(),
+    mode: text("mode").notNull(),
+    /** PXDict dictionary ids the lookup was restricted to; null for the user's enabled set. */
+    dictIdsJson: text("dict_ids_json", { mode: "json" }).$type<string[]>(),
+    createdAt: timestamp("created_at"),
+  },
+  (t) => [index("search_history_user_created_idx").on(t.userId, t.createdAt)],
+);
+
+/** Which dictionaries a user searches, in which order (dicts/registry.ts fills it in lazily). */
+export const userDicts = sqliteTable(
+  "user_dicts",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    dictId: text("dict_id")
+      .notNull()
+      .references(() => dictionaries.id, { onDelete: "cascade" }),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    position: integer("position").notNull(),
+    /** Added automatically after the user's first visit; the PWA announces it until acknowledged. */
+    isNew: integer("is_new", { mode: "boolean" }).notNull().default(false),
+    createdAt: timestamp("created_at"),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.dictId] })],
+);
+
+/** Saved words: one per (headword, dictionary). */
+export const favorites = sqliteTable(
+  "favorites",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    headword: text("headword").notNull(),
+    dictId: text("dict_id")
+      .notNull()
+      .references(() => dictionaries.id, { onDelete: "cascade" }),
+    note: text("note"),
+    createdAt: timestamp("created_at"),
+    updatedAt: timestamp("updated_at"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.headword, t.dictId] }),
+    index("favorites_user_created_idx").on(t.userId, t.createdAt),
   ],
 );

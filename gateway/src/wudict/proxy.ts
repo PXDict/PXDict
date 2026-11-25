@@ -11,7 +11,7 @@ import type { z } from "zod";
 import type { AuthEnv } from "../auth/guards";
 import { jsonError } from "../http/errors";
 import type { Logger } from "../log";
-import type { DictAccess } from "./catalog";
+import type { DictAccess, UserDictView } from "./catalog";
 import { WudictCatalogError } from "./catalog";
 import { WudictTimeoutError, WudictUnavailableError, type WudictClient } from "./client";
 import { ndjsonBody, ndjsonContentType, ndjsonTransform } from "./ndjson";
@@ -27,6 +27,8 @@ export interface WudictRoutesOptions {
   guard: MiddlewareHandler<AuthEnv>;
   /** Signs the resource URLs in search results for sandboxed iframes. */
   signer: ResourceSigner;
+  /** Called once wuDict accepted a search (search history). Never throws into the response. */
+  onSearch?: (userId: string, lookup: { query: string; mode: string; dictIds: string[] | null }) => void;
 }
 
 /** Response headers copied from wuDict for resources. Everything else (Set-Cookie, …) is dropped. */
@@ -51,7 +53,7 @@ const resourceCsp = "sandbox; default-src 'none'; img-src 'self' data:; media-sr
 /** wuDict refuses the gateway itself: 401 wrong token, 403 fetch-metadata guard, 421 unknown Host. */
 const refusedStatuses = new Set([401, 403, 421]);
 
-export function createWudictRoutes({ client, access, logger, guard, signer }: WudictRoutesOptions): Hono<AuthEnv> {
+export function createWudictRoutes({ client, access, logger, guard, signer, onSearch }: WudictRoutesOptions): Hono<AuthEnv> {
   const app = new Hono<AuthEnv>();
   // Only for the methods that have a route, so anything else stays a plain 404. /r/* carries its own
   // credential (the signed token) instead.
@@ -108,11 +110,13 @@ export function createWudictRoutes({ client, access, logger, guard, signer }: Wu
     return result.success ? { ok: true as const, data: result.data } : { ok: false as const };
   };
 
-  /** The requested ids (in request order) that are allowed; every allowed id for none or `all`. */
-  const resolveDicts = (requested: string[] | undefined, allowed: string[]): string[] => {
-    if (!requested?.length || requested.includes("all")) return allowed;
-    const set = new Set(allowed);
-    return [...new Set(requested)].filter((id) => set.has(id));
+  /**
+   * The requested ids (in request order) the user may use, or, for none or `all`, the user's enabled
+   * dictionaries in their order. `explicit` tells the two apart (search history).
+   */
+  const resolveDicts = (requested: string[] | undefined, view: UserDictView) => {
+    if (!requested?.length || requested.includes("all")) return { ids: [...view.enabled], explicit: false };
+    return { ids: [...new Set(requested)].filter((id) => view.usable.has(id)), explicit: true };
   };
 
   const streamNdjson = (c: Context, res: Response, map: (line: unknown) => unknown) => {
@@ -129,18 +133,14 @@ export function createWudictRoutes({ client, access, logger, guard, signer }: Wu
 
   app.get("/api/dicts", async (c) => {
     try {
-      const [allowedList, trusted] = await Promise.all([
-        access.allowedIds(userId(c), c.req.raw.signal),
-        access.trustedIds(c.req.raw.signal),
-      ]);
-      const allowed = new Set(allowedList);
+      const view = await access.forUser(userId(c), c.req.raw.signal);
       const res = await client.request({
         path: "/api/dicts",
         headers: new Headers({ Accept: ndjsonContentType }),
         signal: c.req.raw.signal,
       });
       if (res.status !== 200) return await upstreamError(c, res);
-      return streamNdjson(c, res, (line) => mapDictsLine(line, allowed, trusted));
+      return streamNdjson(c, res, (line) => mapDictsLine(line, view.usable));
     } catch (err) {
       return fail(c, err);
     }
@@ -151,7 +151,8 @@ export function createWudictRoutes({ client, access, logger, guard, signer }: Wu
     if (!q.ok) return jsonError(c, 400, "bad_request", "invalid search parameters");
     try {
       const user = userId(c);
-      const dicts = resolveDicts(q.data.dict, await access.allowedIds(user, c.req.raw.signal));
+      const view = await access.forUser(user, c.req.raw.signal);
+      const { ids: dicts, explicit } = resolveDicts(q.data.dict, view);
       if (!dicts.length) {
         // wuDict answers 404 for a list where no id resolves; nothing to search is an empty result.
         c.header("Cache-Control", "no-store");
@@ -172,7 +173,15 @@ export function createWudictRoutes({ client, access, logger, guard, signer }: Wu
         signal: c.req.raw.signal,
       });
       if (res.status !== 200) return await upstreamError(c, res);
-      const allowed = new Set(dicts);
+      if (onSearch) {
+        try {
+          const dictIds = explicit ? dicts.flatMap((d) => view.usable.get(d)?.dictId ?? []) : null;
+          onSearch(user, { query: q.data.q.trim(), mode: q.data.mode ?? "prefix", dictIds });
+        } catch (err) {
+          logger.error("search history not recorded", { err });
+        }
+      }
+      const allowed = new Map([...view.usable].filter(([id]) => dicts.includes(id)));
       const prefixes = new Map<string, string>();
       const sign = (body: string, dict: string) => {
         let prefix = prefixes.get(dict);
@@ -190,7 +199,7 @@ export function createWudictRoutes({ client, access, logger, guard, signer }: Wu
     if (!q.ok) return jsonError(c, 400, "bad_request", "invalid suggest parameters");
     c.header("Cache-Control", "no-store");
     try {
-      const dicts = resolveDicts(q.data.dict, await access.allowedIds(userId(c), c.req.raw.signal));
+      const { ids: dicts } = resolveDicts(q.data.dict, await access.forUser(userId(c), c.req.raw.signal));
       if (!dicts.length) return c.json({ words: [] });
       const query = new URLSearchParams({ q: q.data.q, dict: dicts.join(",") });
       if (q.data.mode) query.set("mode", q.data.mode);
@@ -219,7 +228,7 @@ export function createWudictRoutes({ client, access, logger, guard, signer }: Wu
     const rest = rawPath.startsWith(prefix) ? checkResourcePath(rawPath.slice(prefix.length)) : undefined;
     if (!dictIdPattern.test(dict) || rest === undefined) return jsonError(c, 404, "not_found", "not found");
     try {
-      if (!(await access.allowedIds(user, c.req.raw.signal)).includes(dict)) {
+      if (!(await access.forUser(user, c.req.raw.signal)).usable.has(dict)) {
         return jsonError(c, 404, "not_found", "not found");
       }
       const headers = new Headers();

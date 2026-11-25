@@ -91,8 +91,14 @@ export interface Config {
   maxPendingBytes: number;
   /** MIN_FREE_BYTES, default 1GB: uploads are refused when the volume has less free space (Phase 6). */
   minFreeBytes: number;
-  /** HISTORY_DEFAULT_RETENTION_DAYS, default 90; 0 keeps history forever (Phase 5). */
+  /** HISTORY_DEFAULT_RETENTION_DAYS, default 90; 0 keeps history forever. */
   historyDefaultRetentionDays: number;
+  /**
+   * BUILTIN_DICT_VISIBILITY, default "global": visibility of a dictionary the gateway finds in DICT_DIR
+   * without a proposal (copied in by the operator). "hidden" keeps it from users until an admin
+   * publishes it (ADR 0007).
+   */
+  builtinDictVisibility: "global" | "hidden";
   /** Sign-in methods and accounts. */
   auth: AuthConfig;
 }
@@ -112,6 +118,7 @@ export const defaults = {
   MAX_PENDING_BYTES: "5GB",
   MIN_FREE_BYTES: "1GB",
   HISTORY_DEFAULT_RETENTION_DAYS: "90",
+  BUILTIN_DICT_VISIBILITY: "global",
   BETTER_AUTH_SECRET: "",
   ADMIN_EMAIL: "",
   ADMIN_USERNAME: "",
@@ -266,6 +273,7 @@ const schema = z.object({
   MAX_PENDING_BYTES: byteSize,
   MIN_FREE_BYTES: byteSize,
   HISTORY_DEFAULT_RETENTION_DAYS: integer(0, 36500),
+  BUILTIN_DICT_VISIBILITY: z.enum(["global", "hidden"]),
   BETTER_AUTH_SECRET: z
     .string()
     .min(32, "must be set to a random string of at least 32 characters (e.g. openssl rand -hex 32)"),
@@ -405,6 +413,7 @@ export function loadConfig(env: Env = process.env): Config {
     maxPendingBytes: c.MAX_PENDING_BYTES,
     minFreeBytes: c.MIN_FREE_BYTES,
     historyDefaultRetentionDays: c.HISTORY_DEFAULT_RETENTION_DAYS,
+    builtinDictVisibility: c.BUILTIN_DICT_VISIBILITY,
     auth: {
       secret: c.BETTER_AUTH_SECRET,
       bootstrapAdmin: c.ADMIN_EMAIL

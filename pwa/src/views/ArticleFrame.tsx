@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { getLocale } from "../i18n";
 import { articleDocument, frameSrc, linkAction, parseFrameMessage, sandboxFor } from "../frame/article";
 import { playAudio } from "../lib/audio";
+import { fontScale, getFontPref } from "../lib/font";
 import { effectiveTheme } from "../lib/theme";
 
 export interface ArticleFrameProps {
@@ -36,7 +37,7 @@ export function ArticleFrame({ body, trusted, title, onLookup }: ArticleFramePro
           if (rendered) return;
           rendered = true;
           frame.contentWindow?.postMessage(
-            { type: "pxdict:render", html: articleDocument({ body, theme: effectiveTheme(), lang: getLocale() }) },
+            { type: "pxdict:render", html: articleDocument({ body, theme: effectiveTheme(), lang: getLocale(), fontScale: fontScale[getFontPref()] }) },
             // An opaque origin can only be addressed as "*"; e.source was checked above.
             trusted ? location.origin : "*",
           );

@@ -1,5 +1,5 @@
-// Account settings: profile, password, passkeys, linked accounts, two-factor, active sessions, and this
-// device's preferences (language, theme).
+// Account settings: profile, preferences (language, theme, text size, default search mode, search
+// history; saved per user), password, passkeys, linked accounts, two-factor, active sessions.
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { encode } from "uqr";
@@ -18,6 +18,7 @@ import {
   revokeOtherSessions,
   revokeSession,
   unlinkAccount,
+  updateSettings,
   verifyTwoFactorSetup,
   type AuthMethods,
   type LinkedAccount,
@@ -25,10 +26,14 @@ import {
   type PasskeyInfo,
   type SessionInfo,
   type TwoFactorSetup,
+  type UserSettings,
 } from "../api/app";
-import { getLocale, locales, localeNames, setLocalePref, t, type Locale } from "../i18n";
+import { searchModes, type SearchMode } from "../api/wudict";
+import { getLocale, locales, localeNames, t } from "../i18n";
 import { errorMessage } from "../lib/errors";
-import { getThemePref, setThemePref, themePrefs, type ThemePref } from "../lib/theme";
+import { fontPrefs, type FontPref } from "../lib/font";
+import { applySettings } from "../lib/settings";
+import { themePrefs, type ThemePref } from "../lib/theme";
 import { Field, Notice } from "./Field";
 
 export interface AccountProps {
@@ -36,9 +41,11 @@ export interface AccountProps {
   /** Re-reads /app-api/me (e.g. after enabling two-factor). */
   onChanged: () => Promise<void>;
   onSignOut: () => void;
+  /** The settings were saved (already applied on this device). */
+  onSettings: (s: UserSettings) => void;
 }
 
-export function Account({ me, onChanged, onSignOut }: AccountProps) {
+export function Account({ me, onChanged, onSignOut, onSettings }: AccountProps) {
   const [methods, setMethods] = useState<AuthMethods | null>(null);
   useEffect(() => {
     const ctrl = new AbortController();
@@ -73,7 +80,7 @@ export function Account({ me, onChanged, onSignOut }: AccountProps) {
         </dl>
         {me.session.impersonatedBy && <Notice kind="info">{t("account.impersonated")}</Notice>}
       </Section>
-      <Preferences />
+      <Preferences settings={me.settings} onSettings={onSettings} />
       <PasswordSection minLength={methods?.minPasswordLength ?? 10} />
       <TwoFactorSection enabled={u.twoFactorEnabled} required={methods?.adminRequiresTwoFactor === true && u.role === "admin"} onChanged={onChanged} />
       {methods?.passkey && <PasskeysSection />}
@@ -126,46 +133,120 @@ function useAction() {
   return { busy, run, notices };
 }
 
-function Preferences() {
-  const [locale, setLoc] = useState<Locale>(getLocale());
-  const [theme, setTheme] = useState<ThemePref>(getThemePref());
+/** Retention choices offered (days; 0 = forever). The server accepts any 0–36500 (HISTORY_DEFAULT_RETENTION_DAYS). */
+const historyRetentionChoices: readonly number[] = [7, 30, 90, 365, 0];
+
+function Preferences({ settings, onSettings }: { settings: UserSettings; onSettings: (s: UserSettings) => void }) {
+  const { busy, run, notices } = useAction();
+  const change = (changes: Partial<UserSettings>) =>
+    void run(async () => {
+      const next = await updateSettings(changes);
+      applySettings(next);
+      onSettings(next);
+    });
+  const retention = historyRetentionChoices.includes(settings.historyRetentionDays)
+    ? historyRetentionChoices
+    : [...historyRetentionChoices, settings.historyRetentionDays];
+  const lang = settings.uiLang && (locales as readonly string[]).includes(settings.uiLang) ? settings.uiLang : "";
   return (
-    <Section title={t("account.device")}>
-      <label class="field">
-        <span>{t("account.language")}</span>
-        <select
-          value={locale}
-          onChange={(e) => {
-            const l = e.currentTarget.value as Locale;
-            setLocalePref(l);
-            setLoc(l);
-          }}
-        >
-          {locales.map((l) => (
-            <option key={l} value={l}>
-              {localeNames[l]}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label class="field">
-        <span>{t("account.theme")}</span>
-        <select
-          value={theme}
-          onChange={(e) => {
-            const v = e.currentTarget.value as ThemePref;
-            setThemePref(v);
-            setTheme(v);
-          }}
-        >
-          {themePrefs.map((p) => (
-            <option key={p} value={p}>
-              {t(`theme.${p}`)}
-            </option>
-          ))}
-        </select>
-      </label>
-    </Section>
+    <>
+      <Section title={t("account.preferences")}>
+        <fieldset class="plain" disabled={busy}>
+          <label class="field">
+            <span>{t("account.language")}</span>
+            <select
+              value={lang}
+              onChange={(e) => {
+                const v = e.currentTarget.value;
+                change({ uiLang: v === "" ? null : v });
+              }}
+            >
+              <option value="">{t("account.languageDevice")}</option>
+              {locales.map((l) => (
+                <option key={l} value={l}>
+                  {localeNames[l]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label class="field">
+            <span>{t("account.theme")}</span>
+            <select
+              value={settings.theme}
+              onChange={(e) => {
+                change({ theme: e.currentTarget.value as ThemePref });
+              }}
+            >
+              {themePrefs.map((p) => (
+                <option key={p} value={p}>
+                  {t(`theme.${p}`)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label class="field">
+            <span>{t("account.fontSize")}</span>
+            <select
+              value={settings.fontSize}
+              onChange={(e) => {
+                change({ fontSize: e.currentTarget.value as FontPref });
+              }}
+            >
+              {fontPrefs.map((p) => (
+                <option key={p} value={p}>
+                  {t(`font.${p}`)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label class="field">
+            <span>{t("account.defaultMode")}</span>
+            <select
+              value={settings.defaultMode}
+              onChange={(e) => {
+                change({ defaultMode: e.currentTarget.value as SearchMode });
+              }}
+            >
+              {searchModes.map((m) => (
+                <option key={m} value={m}>
+                  {t(`search.mode.${m}`)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </fieldset>
+        {notices}
+      </Section>
+      <Section title={t("account.historyTitle")}>
+        <fieldset class="plain" disabled={busy}>
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={settings.historyEnabled}
+              onChange={(e) => {
+                change({ historyEnabled: e.currentTarget.checked });
+              }}
+            />
+            <span>{t("account.historyEnabled")}</span>
+          </label>
+          <label class="field">
+            <span>{t("account.retention")}</span>
+            <select
+              value={String(settings.historyRetentionDays)}
+              onChange={(e) => {
+                change({ historyRetentionDays: Number(e.currentTarget.value) });
+              }}
+            >
+              {retention.map((d) => (
+                <option key={d} value={String(d)}>
+                  {d === 0 ? t("retention.forever") : t("retention.days", { n: d })}
+                </option>
+              ))}
+            </select>
+          </label>
+        </fieldset>
+      </Section>
+    </>
   );
 }
 

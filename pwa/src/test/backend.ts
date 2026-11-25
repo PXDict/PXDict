@@ -58,6 +58,15 @@ export const me: Me = {
     createdAt: "2026-01-01T00:00:00.000Z",
   },
   session: { id: "s1", expiresAt: "2026-12-31T00:00:00.000Z", impersonatedBy: null },
+  settings: {
+    historyEnabled: true,
+    historyRetentionDays: 90,
+    defaultMode: "exact",
+    uiLang: null,
+    theme: "system",
+    fontSize: "medium",
+  },
+  newDicts: [],
 };
 
 export const unauthorized = () =>

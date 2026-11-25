@@ -1,11 +1,15 @@
 // The app shell: who is signed in (with an offline fallback), the routes, and the header.
 import { useCallback, useEffect, useState } from "preact/hooks";
-import { getMe, isNetworkError, onUnauthorized, signOut, ApiError, type Me } from "./api/app";
+import { getMe, isNetworkError, markDictsSeen, onUnauthorized, signOut, ApiError, type Me, type UserSettings } from "./api/app";
 import { onLocaleChange, t } from "./i18n";
 import { readLastUser, setActiveUser, wipeUserData, type LastUser } from "./lib/offline";
 import { loginUrl, navigate, safeNext, useLocation } from "./lib/router";
+import { applySettings } from "./lib/settings";
 import { Account } from "./views/Account";
+import { Dictionaries } from "./views/Dictionaries";
+import { Favorites } from "./views/Favorites";
 import { Notice } from "./views/Field";
+import { History } from "./views/History";
 import { Login } from "./views/Login";
 import { ResetPassword } from "./views/ResetPassword";
 import { SearchView } from "./views/SearchView";
@@ -39,6 +43,7 @@ export function App() {
   const loadMe = useCallback(async () => {
     try {
       const me = await getMe();
+      applySettings(me.settings);
       setSession({ kind: "signed-in", me });
       setFatal(null);
       await setActiveUser({ id: me.user.id, name: me.user.name, role: me.user.role });
@@ -104,6 +109,17 @@ export function App() {
     })();
   };
 
+  /** Saved settings (Account) or acknowledged new dictionaries: update the copy of /me. */
+  const patchMe = useCallback((patch: Partial<Me>) => {
+    setSession((s) => (s.kind === "signed-in" ? { kind: "signed-in", me: { ...s.me, ...patch } } : s));
+  }, []);
+  const onSettings = useCallback((settings: UserSettings) => {
+    patchMe({ settings });
+  }, [patchMe]);
+  const onDictsSeen = useCallback(() => {
+    patchMe({ newDicts: [] });
+  }, [patchMe]);
+
   if (session.kind === "loading") {
     return (
       <main class="shell">
@@ -128,12 +144,16 @@ export function App() {
     );
   }
 
-  const name = session.kind === "signed-in" ? session.me.user.name : session.user.name;
+  const me = session.kind === "signed-in" ? session.me : undefined;
+  const name = me ? me.user.name : session.kind === "offline" ? session.user.name : "";
+  // Pages that need the server; offline they say so.
+  const offline = <Notice kind="info">{t("error.offline")}</Notice>;
   let page;
-  if (loc.path === "/") page = <SearchView loc={loc} />;
-  else if (loc.path === "/account" && session.kind === "signed-in") {
-    page = <Account me={session.me} onChanged={loadMe} onSignOut={doSignOut} />;
-  } else if (loc.path === "/account") page = <Notice kind="info">{t("error.offline")}</Notice>;
+  if (loc.path === "/") page = <SearchView loc={loc} historyEnabled={me?.settings.historyEnabled ?? false} />;
+  else if (loc.path === "/account") page = me ? <Account me={me} onChanged={loadMe} onSignOut={doSignOut} onSettings={onSettings} /> : offline;
+  else if (loc.path === "/history") page = me ? <History enabled={me.settings.historyEnabled} /> : offline;
+  else if (loc.path === "/favorites") page = me ? <Favorites /> : offline;
+  else if (loc.path === "/dictionaries") page = me ? <Dictionaries onSeen={onDictsSeen} /> : offline;
   else if (publicPaths.has(loc.path)) page = null;
   else {
     page = (
@@ -146,29 +166,64 @@ export function App() {
     );
   }
 
+  const navLink = (path: string, label: string) => (
+    <a
+      href={path}
+      aria-current={loc.path === path ? "page" : undefined}
+      onClick={(e) => {
+        e.preventDefault();
+        navigate(path);
+      }}
+    >
+      {label}
+    </a>
+  );
+
+  const newDicts = me?.newDicts ?? [];
+
   return (
     <>
       <header class="topbar">
         <a class="brand" href="/" onClick={(e) => { e.preventDefault(); navigate("/"); }}>
           {t("app.name")}
         </a>
-        <nav>
+        <nav aria-label={t("nav.main")}>
           {session.kind === "offline" && <span class="badge">{t("status.offline")}</span>}
-          <a
-            href="/account"
-            aria-current={loc.path === "/account" ? "page" : undefined}
-            onClick={(e) => {
-              e.preventDefault();
-              navigate("/account");
-            }}
-          >
-            {name}
-          </a>
+          {navLink("/history", t("nav.history"))}
+          {navLink("/favorites", t("nav.favorites"))}
+          {navLink("/dictionaries", t("nav.dicts"))}
+          {navLink("/account", name)}
           <button type="button" class="link" onClick={doSignOut}>
             {t("nav.signOut")}
           </button>
         </nav>
       </header>
+      {newDicts.length > 0 && loc.path !== "/dictionaries" && (
+        <div class="shell banner" role="status">
+          <span>{t("newDicts.notice", { names: newDicts.map((d) => d.title).join(", ") })}</span>{" "}
+          <a
+            href="/dictionaries"
+            onClick={(e) => {
+              e.preventDefault();
+              navigate("/dictionaries");
+            }}
+          >
+            {t("newDicts.manage")}
+          </a>{" "}
+          <button
+            type="button"
+            class="link"
+            onClick={() => {
+              onDictsSeen();
+              markDictsSeen().catch(() => {
+                // Announced again next time.
+              });
+            }}
+          >
+            {t("newDicts.dismiss")}
+          </button>
+        </div>
+      )}
       <div class="shell">{page}</div>
       <UpdatePrompt />
     </>

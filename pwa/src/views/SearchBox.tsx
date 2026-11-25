@@ -7,12 +7,15 @@ import { t } from "../i18n";
 export interface SearchBoxProps {
   query: string;
   mode: SearchMode;
+  /** Recent lookups, offered while the box is empty. */
+  recent?: readonly string[];
   onSearch: (q: string, mode: SearchMode) => void;
 }
 
 const debounceMs = 150;
+const noRecent: readonly string[] = [];
 
-export function SearchBox({ query, mode, onSearch }: SearchBoxProps) {
+export function SearchBox({ query, mode, recent = noRecent, onSearch }: SearchBoxProps) {
   const [text, setText] = useState(query);
   const [words, setWords] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
@@ -25,11 +28,16 @@ export function SearchBox({ query, mode, onSearch }: SearchBoxProps) {
     setOpen(false);
   }, [query]);
 
-  // Suggestions while typing.
+  // Suggestions while typing; recent lookups while the box is empty.
   useEffect(() => {
     const q = text.trim();
-    if (!q || !open) {
+    if (!open) {
       setWords([]);
+      return;
+    }
+    if (!q) {
+      setWords([...recent]);
+      setActive(-1);
       return;
     }
     const ctrl = new AbortController();
@@ -48,7 +56,7 @@ export function SearchBox({ query, mode, onSearch }: SearchBoxProps) {
       clearTimeout(timer);
       ctrl.abort();
     };
-  }, [text, open]);
+  }, [text, open, recent]);
 
   // Global shortcuts to focus the search box.
   useEffect(() => {
@@ -107,6 +115,9 @@ export function SearchBox({ query, mode, onSearch }: SearchBoxProps) {
             setText(e.currentTarget.value);
             setOpen(true);
           }}
+          onFocus={() => {
+            if (!text.trim()) setOpen(true);
+          }}
           onBlur={() => {
             // Let a click on a suggestion land first.
             setTimeout(() => {
@@ -128,7 +139,7 @@ export function SearchBox({ query, mode, onSearch }: SearchBoxProps) {
           }}
         />
         {showList && (
-          <ul id="suggestions" class="suggestions" role="listbox" aria-label={t("search.suggestions")}>
+          <ul id="suggestions" class="suggestions" role="listbox" aria-label={t(text.trim() ? "search.suggestions" : "history.recent")}>
             {words.map((w, i) => (
               <li
                 key={w}

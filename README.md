@@ -47,9 +47,10 @@ See [`AGENTS.md`](AGENTS.md) for the architecture rules and [`docs/PLAN.md`](doc
 
 ## Quick start
 
-> Not usable yet — Phases 0–3 of the [plan](docs/PLAN.md) are done: the gateway has accounts and
-> sign-in (Better Auth), but the PWA has no login screen or lookup UI until Phase 4. On first start,
-> the log shows the `admin` user's one-time password unless `ADMIN_EMAIL` / `ADMIN_PASSWORD` are set
+> Work in progress — Phases 0–5 of the [plan](docs/PLAN.md) are done: accounts and sign-in (Better
+> Auth), the lookup PWA (offline-capable), and per-user history, dictionary selection, saved words and
+> settings. Dictionary proposals and the admin screens come next. On first start, the log shows the
+> `admin` user's one-time password unless `ADMIN_EMAIL` / `ADMIN_PASSWORD` are set
 > (see [`gateway/README.md`](gateway/README.md)).
 
 ```bash
