@@ -1,0 +1,27 @@
+<!doctype html>
+<!--
+  The page dictionary articles render in (src/frame/article.ts, ADR 0006). The PWA loads it in an
+  iframe, sandboxed to an opaque origin unless the dictionary is trusted, and posts the article
+  document to it once; it replaces itself with that document. The gateway serves it with its own CSP.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script>
+      (function () {
+        var done = false;
+        addEventListener("message", function (e) {
+          if (done || e.source !== parent) return;
+          var d = e.data;
+          if (!d || d.type !== "pxdict:render" || typeof d.html !== "string") return;
+          done = true;
+          document.open();
+          document.write(d.html);
+          document.close();
+        });
+        parent.postMessage({ type: "pxdict:ready" }, "*");
+      })();
+    </script>
+  </head>
+  <body></body>
+</html>

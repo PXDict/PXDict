@@ -14,6 +14,11 @@ import { harness, ndjsonLines } from "../test/harness";
 import { WudictClient } from "./client";
 
 const bin = process.env.WUDICT_BIN;
+/** A 1×1 PNG. */
+const pngBytes = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
 const token = "contract-".padEnd(48, "k");
 
 const dsl = [
@@ -25,6 +30,8 @@ const dsl = [
   "\t[m1]a greeting[/m]",
   "help",
   "\t[m1]assistance[/m]",
+  "picture",
+  "\t[m1][s]pic.png[/s] an image[/m]",
   "",
 ].join("\n");
 
@@ -47,6 +54,8 @@ describe.skipIf(!bin)("contract with the real wuDict", () => {
   let proc: ChildProcess | undefined;
   let base: URL;
   let app: { request: (path: string) => Promise<Response> };
+  /** The gateway without any session (as a sandboxed iframe calls it). */
+  let anonymous: { request: (path: string) => Response | Promise<Response> };
   let dictId: string;
 
   beforeAll(async () => {
@@ -55,6 +64,7 @@ describe.skipIf(!bin)("contract with the real wuDict", () => {
       fs.mkdirSync(path.join(dir, d), { recursive: true });
     }
     fs.writeFileSync(path.join(dir, "dictionaries/contract/contract.dsl"), dsl);
+    fs.writeFileSync(path.join(dir, "dictionaries/contract/pic.png"), pngBytes);
     const port = await freePort();
     base = new URL(`http://127.0.0.1:${String(port)}`);
 
@@ -93,6 +103,7 @@ describe.skipIf(!bin)("contract with the real wuDict", () => {
     const h = harness({ wudict: client });
     // Signed in as a regular user, as the PWA would be.
     app = { request: h.request };
+    anonymous = h.app;
 
     const lines = await ndjsonLines(await app.request("/api/dicts"));
     const row = lines.find((l) => l.t === "dict");
@@ -152,6 +163,21 @@ describe.skipIf(!bin)("contract with the real wuDict", () => {
     const res = await app.request("/api/suggest?q=hel");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ words: ["hello", "help"] });
+  });
+
+  it("article resources are signed (/r/) and load without a session (Q7)", async () => {
+    const lines = await ndjsonLines(await app.request("/api/search?q=picture&mode=exact"));
+    const hit = lines.find((l) => l.t === "hit") as { results?: { Body: string }[] } | undefined;
+    const body = hit?.results?.[0]?.Body ?? "";
+    expect(body).not.toContain(`/res/${dictId}/`);
+    const m = new RegExp(`/r/[^/"]+/${dictId}/pic\\.png`).exec(body);
+    expect(m, body).not.toBeNull();
+    const res = await anonymous.request(m?.[0] ?? "");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect(Buffer.from(await res.arrayBuffer())).toEqual(pngBytes);
+    // The session-protected path refuses the same request without a session.
+    expect((await anonymous.request(`/res/${dictId}/pic.png`)).status).toBe(401);
   });
 
   it("an unknown resource is a 404", async () => {

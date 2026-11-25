@@ -22,9 +22,10 @@ describe("GET /api/dicts", () => {
     const dicts = lines.filter((l) => l.t === "dict").map((l) => l.dict as Record<string, unknown>);
     expect(dicts.map((d) => d.id)).toEqual(["aaaaaaaaaaaa", "bbbbbbbbbbbb"]);
     for (const d of dicts) {
-      expect(Object.keys(d).sort()).toEqual(["caps", "entries", "format", "id", "name"]);
+      expect(Object.keys(d).sort()).toEqual(["caps", "entries", "format", "id", "name", "trustedRender"]);
     }
     expect(JSON.stringify(lines)).not.toContain("/data/");
+    expect(dicts.every((d) => d.trustedRender === false)).toBe(true);
   });
 });
 
@@ -198,5 +199,55 @@ describe("upstream failures", () => {
     const res = await request("/api/search?q=cat");
     expect(res.status).toBe(504);
     expect(ErrorBody.parse(await res.json()).error.code).toBe("wudict_timeout");
+  });
+});
+
+describe("signed resource URLs (/r/)", () => {
+  async function signedCatUrl(request: (p: string) => Promise<Response>): Promise<string> {
+    const lines = await ndjsonLines(await request("/api/search?q=cat&dict=aaaaaaaaaaaa"));
+    const hit = lines.find((l) => l.t === "hit") as { results: { Body: string }[] } | undefined;
+    const body = hit?.results[0]?.Body ?? "";
+    expect(body).not.toContain("/res/aaaaaaaaaaaa/");
+    const m = /src="(\/r\/[^/"]+\/aaaaaaaaaaaa\/img\/cat\.png)"/.exec(body);
+    expect(m, body).not.toBeNull();
+    return m?.[1] ?? "";
+  }
+
+  it("rewrites article references and serves them without a session", async () => {
+    const h = harness();
+    const url = await signedCatUrl(h.request);
+    // A cookie-less request, as from an opaque-origin iframe.
+    const res = await h.app.request(url);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("PNG-cat");
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    expect(res.headers.get("cross-origin-resource-policy")).toBe("cross-origin");
+    expect(res.headers.get("content-security-policy")).toMatch(/^sandbox/);
+    expect(res.headers.get("set-cookie")).toBeNull();
+    // Relative references from a CSS file stay under the signed prefix.
+    const css = await h.app.request(url.replace("img/cat.png", "style.css"));
+    expect(css.status).toBe(200);
+  });
+
+  it("is the same token for repeated searches (cache-friendly)", async () => {
+    const h = harness();
+    expect(await signedCatUrl(h.request)).toBe(await signedCatUrl(h.request));
+  });
+
+  it("refuses a token for another dictionary, a forged one, or a bad path", async () => {
+    const h = harness();
+    const url = await signedCatUrl(h.request);
+    const token = url.split("/")[2] ?? "";
+    const forged = `${token.slice(0, -2)}${token.endsWith("AA") ? "BB" : "AA"}`;
+    for (const bad of [
+      url.replace("/aaaaaaaaaaaa/", "/bbbbbbbbbbbb/"),
+      url.replace(token, forged),
+      url.replace(token, "nope"),
+      `/r/${token}/aaaaaaaaaaaa/img/%2e%2e/cat.png`,
+      "/r/x/aaaaaaaaaaaa/img/cat.png",
+    ]) {
+      const res = await h.app.request(bad);
+      expect(res.status, bad).toBe(404);
+    }
   });
 });

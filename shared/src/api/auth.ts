@@ -61,6 +61,8 @@ export const Me = z.object({
     createdAt: z.iso.datetime(),
   }),
   session: z.object({
+    /** This session's id (Better Auth's session list marks the current device with it). */
+    id: z.string(),
     expiresAt: z.iso.datetime(),
     /** Set while an admin impersonates this user: the admin's user id. */
     impersonatedBy: z.string().nullable(),

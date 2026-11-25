@@ -100,6 +100,7 @@ describe("static PWA", () => {
   write("app-assets/index-abc123.js", "console.log('x')".repeat(200));
   write("app-assets/index-abc123.js.br", zlib.brotliCompressSync("console.log('x')".repeat(200)));
   write("icon.svg", "<svg/>");
+  write("frame.html", "<!doctype html><script>1</script>");
   write("api/oops.js", "should never be served");
   afterAll(() => {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -115,6 +116,18 @@ describe("static PWA", () => {
       expect(res.headers.get("cache-control")).toBe("no-cache");
       expect(res.headers.get("content-security-policy")).toContain("script-src 'self'");
     }
+  });
+
+  it("gives the article frame its own CSP", async () => {
+    const res = await app.request("/frame.html");
+    expect(res.status).toBe(200);
+    const csp = res.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain("script-src http://localhost:8080 'unsafe-inline'");
+    expect(csp).toContain("connect-src 'none'");
+    expect(csp).toContain("frame-ancestors 'self'");
+    expect(res.headers.get("cache-control")).toBe("no-cache");
+    const versioned = await app.request("/frame.html?v=abc");
+    expect(versioned.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
   });
 
   it("serves the manifest uncached and hashed assets as immutable", async () => {

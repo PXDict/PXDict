@@ -16,6 +16,7 @@ import { mountPwa } from "./static/pwa";
 import type { DictAccess } from "./wudict/catalog";
 import type { WudictClient } from "./wudict/client";
 import { createWudictRoutes } from "./wudict/proxy";
+import { ResourceSigner } from "./wudict/signed-url";
 
 export interface AppOptions {
   /** Reported by /healthz. */
@@ -93,9 +94,10 @@ export function createApp(opts: AppOptions): Hono<AuthEnv> {
 
   app.all("/app-api/*", (c) => jsonError(c, 404, "not_found", "no such endpoint"));
 
-  app.route("/", createWudictRoutes({ client: wudict, access: opts.access, logger, guard: guards.requireUser }));
+  const signer = new ResourceSigner(config.auth.secret);
+  app.route("/", createWudictRoutes({ client: wudict, access: opts.access, logger, guard: guards.requireUser, signer }));
 
-  if (opts.pwaDir) mountPwa(app, opts.pwaDir);
+  if (opts.pwaDir) mountPwa(app, opts.pwaDir, { publicOrigin: config.publicUrl.origin });
 
   // Missing PWA files and every wuDict path that is not allowlisted (/setup, /api/library, …) end here.
   app.notFound((c) => jsonError(c, 404, "not_found", "not found"));

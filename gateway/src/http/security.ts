@@ -3,8 +3,8 @@
 import type { MiddlewareHandler } from "hono";
 
 /**
- * CSP for the PWA. Phase 4 adds what sandboxed dictionary iframes need (frame-src, blob: for audio)
- * once they exist; until then the policy stays as strict as the empty PWA allows.
+ * CSP for the PWA. Dictionary articles never run under it: they render in /frame.html, which has its
+ * own policy (frameCsp).
  */
 export const pwaCsp = [
   "default-src 'self'",
@@ -22,6 +22,30 @@ export const pwaCsp = [
   "form-action 'self'",
   "frame-ancestors 'self'",
 ].join("; ");
+
+/**
+ * CSP for /frame.html, the page dictionary articles are rendered in (inside an iframe, sandboxed to an
+ * opaque origin unless the dictionary is trusted). Dictionaries ship inline scripts and styles, so
+ * those are allowed; everything else may come only from the gateway (signed /r/ URLs), nothing may be
+ * fetched, framed or submitted. The origin is spelled out because 'self' is ambiguous in an
+ * opaque-origin document.
+ */
+export function frameCsp(origin: string): string {
+  return [
+    "default-src 'none'",
+    `script-src ${origin} 'unsafe-inline'`,
+    `style-src ${origin} 'unsafe-inline'`,
+    `img-src ${origin} data: blob:`,
+    `media-src ${origin} data: blob:`,
+    `font-src ${origin} data:`,
+    "connect-src 'none'",
+    "frame-src 'none'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'self'",
+  ].join("; ");
+}
 
 export const permissionsPolicy = [
   "accelerometer=()",

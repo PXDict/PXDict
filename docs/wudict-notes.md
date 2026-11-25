@@ -290,6 +290,9 @@ Found while building the image and the contract tests (same tag, purego build):
 Nothing blocks Phase 1. These have a fallback and are re-checked later:
 
 - [ ] Delete-originals for formats other than MDX/MDD (ZIM, StarDict, DSL, BGL, slob). Fallback: hidden.
-- [ ] Cookies/`Sec-Fetch-*` for `/r/` requests from a sandboxed iframe in real browsers (Phase 4).
+- [x] Cookies/`Sec-Fetch-*` for `/r/` requests from a sandboxed iframe (Phase 4): no longer depended on.
+  `/r/` URLs carry their own signed token and the gateway accepts them without cookies or fetch
+  metadata checks ([ADR 0006](adr/0006-article-rendering-and-offline.md)). The contract test checks a DSL
+  `[s]` image through `/r/` against the real binary.
 - [ ] arm64 purego build and its RAM numbers (Phase 8 builds multi-arch; the amd64 numbers are the budget).
 - [ ] Indexing RAM with a real large dictionary (Phase 9, on the target VPS).
