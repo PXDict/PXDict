@@ -25,6 +25,8 @@ jobs:
       - run: npm ci
       - name: Generated wuDict types are up to date
         run: npm run gen:api -- --check
+      - name: Better Auth schema matches its plugins and version
+        run: node gateway/scripts/gen-auth-schema.mjs --check
       - name: Database migrations match the schema
         run: |
           npm run db:generate -w @pxdict/gateway

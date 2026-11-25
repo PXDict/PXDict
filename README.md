@@ -47,8 +47,10 @@ See [`AGENTS.md`](AGENTS.md) for the architecture rules and [`docs/PLAN.md`](doc
 
 ## Quick start
 
-> Not usable yet — Phase 2 (gateway foundation, runnable image) of the [plan](docs/PLAN.md) is done;
-> there are no accounts until Phase 3, so do not expose an instance publicly.
+> Not usable yet — Phases 0–3 of the [plan](docs/PLAN.md) are done: the gateway has accounts and
+> sign-in (Better Auth), but the PWA has no login screen or lookup UI until Phase 4. On first start,
+> the log shows the `admin` user's one-time password unless `ADMIN_EMAIL` / `ADMIN_PASSWORD` are set
+> (see [`gateway/README.md`](gateway/README.md)).
 
 ```bash
 # development: Node.js 26 LTS (see .nvmrc)

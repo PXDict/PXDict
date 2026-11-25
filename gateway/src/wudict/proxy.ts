@@ -2,9 +2,10 @@
 // explicit `dict=` list from DictAccess, and allowlisted headers both ways. The browser's Cookie and
 // Authorization headers and wuDict's Set-Cookie never cross, because headers are copied by allowlist.
 // Streams (NDJSON) are forwarded line by line as wuDict produces them.
-import type { Context } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { z } from "zod";
+import type { AuthEnv } from "../auth/guards";
 import { jsonError } from "../http/errors";
 import type { Logger } from "../log";
 import type { DictAccess } from "./catalog";
@@ -18,6 +19,8 @@ export interface WudictRoutesOptions {
   client: WudictClient;
   access: DictAccess;
   logger: Logger;
+  /** Runs before every proxied route (the session check); routes that are not allowlisted stay 404. */
+  guard?: MiddlewareHandler<AuthEnv>;
 }
 
 /** Response headers copied from wuDict for resources. Everything else (Set-Cookie, …) is dropped. */
@@ -42,8 +45,14 @@ const resourceCsp = "sandbox; default-src 'none'; img-src 'self' data:; media-sr
 /** wuDict refuses the gateway itself: 401 wrong token, 403 fetch-metadata guard, 421 unknown Host. */
 const refusedStatuses = new Set([401, 403, 421]);
 
-export function createWudictRoutes({ client, access, logger }: WudictRoutesOptions): Hono {
-  const app = new Hono();
+export function createWudictRoutes({ client, access, logger, guard }: WudictRoutesOptions): Hono<AuthEnv> {
+  const app = new Hono<AuthEnv>();
+  if (guard) {
+    // Only for the methods that have a route, so anything else stays a plain 404.
+    const guardReads: MiddlewareHandler<AuthEnv> = (c, next) =>
+      c.req.method === "GET" || c.req.method === "HEAD" ? guard(c, next) : next();
+    for (const path of ["/api/dicts", "/api/search", "/api/suggest", "/res/:dict/*"]) app.use(path, guardReads);
+  }
 
   /** The gateway's token or Host is wrong: a deployment problem, never the user's. */
   const logRefused = (path: string, status: number) => {
@@ -211,7 +220,7 @@ export function createWudictRoutes({ client, access, logger }: WudictRoutesOptio
         const v = res.headers.get(h);
         if (v !== null) out.set(h, v);
       }
-      // Access is per user from Phase 3 on: never let a shared cache (e.g. a CDN) keep it.
+      // Access is per user: never let a shared cache (e.g. a CDN) keep it.
       out.set("Cache-Control", "private, max-age=86400");
       out.set("Content-Security-Policy", resourceCsp);
       // Sandboxed iframes have an opaque origin; same-origin CORP would block their subresources.

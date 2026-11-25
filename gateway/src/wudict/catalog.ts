@@ -1,8 +1,8 @@
 // Which wuDict dictionaries a request may use. The proxy always sends wuDict an explicit `dict=` list
 // built from this (never `all`), and filters /api/dicts with it.
 //
-// Phase 2 has no users: every dictionary wuDict lists except its builtin howto is allowed. Phase 5
-// replaces WudictCatalog with the gateway's `dictionaries` + `user_dicts` tables.
+// Until Phase 5 every signed-in user may use every dictionary wuDict lists except its builtin howto.
+// Phase 5 replaces WudictCatalog with the gateway's `dictionaries` + `user_dicts` tables.
 import type { WudictClient } from "./client";
 import { isBuiltinDict } from "./sanitize";
 

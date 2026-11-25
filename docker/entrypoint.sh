@@ -6,6 +6,9 @@
 # Environment (beyond the gateway's own, see gateway/src/config.ts):
 #   AUTH_TOKEN                 wuDict's access token, shared only by wuDict and the gateway.
 #                              Default: a fresh random token on every start (nothing else needs it).
+#   BETTER_AUTH_SECRET         signs session cookies and encrypts OAuth tokens; must stay the same
+#                              across restarts. Default: generated once and kept in
+#                              /data/gateway/better-auth-secret (mode 600).
 #   GATEWAY_MAX_OLD_SPACE_MB   V8 heap limit of the gateway (default 128).
 #   INDEX_WORKERS, PREVIEW_MEMORY, SEARCH_MEMORY, MORPH_CACHE, MEMORY_LIMIT, COMPRESSION, AUTO_INDEX,
 #   GOGC, GOMEMLIMIT, TZ       passed to wuDict when set. No other variable reaches wuDict.
@@ -33,6 +36,18 @@ fi
 ((${#AUTH_TOKEN} >= 32)) || die "AUTH_TOKEN must be at least 32 characters (e.g. openssl rand -hex 32)"
 
 mkdir -p "$data"/{dictionaries,db,gateway,proposals,tmp} "$data"/.wudict/{config,data,state,home}
+
+# Unlike AUTH_TOKEN, this secret must survive restarts (sessions, encrypted OAuth tokens), so a
+# generated one is stored on the volume. Changing it signs everyone out.
+secret_file="$data/gateway/better-auth-secret"
+if [[ -z "${BETTER_AUTH_SECRET:-}" ]]; then
+  if [[ ! -s "$secret_file" ]]; then
+    (umask 077 && od -An -N32 -tx1 /dev/urandom | tr -d ' \n' >"$secret_file.tmp" && mv "$secret_file.tmp" "$secret_file")
+    log info "generated BETTER_AUTH_SECRET in $secret_file"
+  fi
+  BETTER_AUTH_SECRET="$(<"$secret_file")"
+fi
+((${#BETTER_AUTH_SECRET} >= 32)) || die "BETTER_AUTH_SECRET must be at least 32 characters (e.g. openssl rand -hex 32)"
 
 # --- wuDict ---------------------------------------------------------------------------------------
 # A clean environment: only the tuning variables below are passed through, and the settings PXDict
@@ -72,7 +87,7 @@ wudict_pid=$!
 
 # --- gateway --------------------------------------------------------------------------------------
 log info "starting pxdict-gateway"
-AUTH_TOKEN="$AUTH_TOKEN" DATA_DIR="$data" WUDICT_URL="http://$wudict_addr" \
+AUTH_TOKEN="$AUTH_TOKEN" BETTER_AUTH_SECRET="$BETTER_AUTH_SECRET" DATA_DIR="$data" WUDICT_URL="http://$wudict_addr" \
   node --max-old-space-size="${GATEWAY_MAX_OLD_SPACE_MB:-128}" /app/pxdict-gateway.mjs &
 gateway_pid=$!
 

@@ -11,8 +11,8 @@ const browserHeaders = {
 
 describe("GET /api/dicts", () => {
   it("drops the howto and every filesystem or global field", async () => {
-    const { app } = harness();
-    const res = await app.request("/api/dicts");
+    const { request } = harness();
+    const res = await request("/api/dicts");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/x-ndjson");
     expect(res.headers.get("set-cookie")).toBeNull();
@@ -30,8 +30,8 @@ describe("GET /api/dicts", () => {
 
 describe("GET /api/search", () => {
   it("always sends an explicit dictionary list, the token, and nothing from the browser", async () => {
-    const { app, upstream } = harness();
-    const res = await app.request("/api/search?q=cat&mode=exact&k=stolen-token&dict=all&evil=1", {
+    const { request, upstream } = harness();
+    const res = await request("/api/search?q=cat&mode=exact&k=stolen-token&dict=all&evil=1", {
       headers: browserHeaders,
     });
     expect(res.status).toBe(200);
@@ -47,8 +47,8 @@ describe("GET /api/search", () => {
   });
 
   it("streams hits from the allowed dictionaries", async () => {
-    const { app, upstream } = harness();
-    const res = await app.request("/api/search?q=cat", { headers: browserHeaders });
+    const { request, upstream } = harness();
+    const res = await request("/api/search?q=cat", { headers: browserHeaders });
     const lines = await ndjsonLines(res);
     expect(lines[0]).toMatchObject({ t: "begin", slots: [{ dict: "aaaaaaaaaaaa" }, { dict: "bbbbbbbbbbbb" }] });
     expect(lines.filter((l) => l.t === "hit")).toHaveLength(2);
@@ -64,16 +64,16 @@ describe("GET /api/search", () => {
   });
 
   it("keeps only allowed dictionaries from the requested list, in request order", async () => {
-    const { app, upstream } = harness();
-    await app.request("/api/search?q=cat&dict=bbbbbbbbbbbb,nothere00000,aaaaaaaaaaaa,bbbbbbbbbbbb");
+    const { request, upstream } = harness();
+    await request("/api/search?q=cat&dict=bbbbbbbbbbbb,nothere00000,aaaaaaaaaaaa,bbbbbbbbbbbb");
     expect(upstream("/api/search")[0]?.url.searchParams.get("dict")).toBe("bbbbbbbbbbbb,aaaaaaaaaaaa");
   });
 
   it.each(["dict=nothere00000", "dict=wudict-howto"])(
     "answers an empty result for %s without asking wuDict",
     async (param) => {
-      const { app, upstream } = harness();
-      const res = await app.request(`/api/search?q=cat&${param}`);
+      const { request, upstream } = harness();
+      const res = await request(`/api/search?q=cat&${param}`);
       expect(res.status).toBe(200);
       expect(await ndjsonLines(res)).toEqual([{ t: "begin", slots: [] }, { t: "end" }]);
       expect(upstream("/api/search")).toEqual([]);
@@ -91,18 +91,18 @@ describe("GET /api/search", () => {
     "q=cat&dict=../etc",
     `q=${"x".repeat(501)}`,
   ])("rejects ?%s with 400", async (qs) => {
-    const { app, upstream } = harness();
-    const res = await app.request(`/api/search?${qs}`);
+    const { request, upstream } = harness();
+    const res = await request(`/api/search?${qs}`);
     expect(res.status).toBe(400);
     expect(ErrorBody.parse(await res.json()).error.code).toBe("bad_request");
     expect(upstream("/api/search")).toEqual([]);
   });
 
   it("does not forward wuDict's error messages", async () => {
-    const { app, fake } = harness({ catalogTtlMs: 60_000 });
-    await app.request("/api/dicts"); // the catalogue now lists both dictionaries
+    const { request, fake } = harness({ catalogTtlMs: 60_000 });
+    await request("/api/dicts"); // the catalogue now lists both dictionaries
     fake.dicts = []; // …but wuDict no longer knows them and answers 404 with a path in the message
-    const res = await app.request("/api/search?q=cat");
+    const res = await request("/api/search?q=cat");
     expect(res.status).toBe(404);
     expect(await res.text()).not.toContain("/data/");
   });
@@ -110,8 +110,8 @@ describe("GET /api/search", () => {
 
 describe("GET /api/suggest", () => {
   it("returns the words from the allowed dictionaries", async () => {
-    const { app, upstream } = harness();
-    const res = await app.request("/api/suggest?q=ca&k=x", { headers: browserHeaders });
+    const { request, upstream } = harness();
+    const res = await request("/api/suggest?q=ca&k=x", { headers: browserHeaders });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ words: ["car", "cat"] });
     const [req] = upstream("/api/suggest");
@@ -122,15 +122,15 @@ describe("GET /api/suggest", () => {
   });
 
   it("rejects modes wuDict does not support", async () => {
-    const { app } = harness();
-    expect((await app.request("/api/suggest?q=ca&mode=exact")).status).toBe(400);
+    const { request } = harness();
+    expect((await request("/api/suggest?q=ca&mode=exact")).status).toBe(400);
   });
 });
 
 describe("GET /res/{dict}/{path}", () => {
   it("serves resources of allowed dictionaries with safe headers", async () => {
-    const { app, upstream } = harness();
-    const res = await app.request("/res/aaaaaaaaaaaa/img/cat.png", {
+    const { request, upstream } = harness();
+    const res = await request("/res/aaaaaaaaaaaa/img/cat.png", {
       headers: { ...browserHeaders, Range: "bytes=0-2" },
     });
     expect(res.status).toBe(200);
@@ -159,8 +159,8 @@ describe("GET /res/{dict}/{path}", () => {
     "/res/aaaaaaaaaaaa/img//cat.png",
     "/res/aaaaaaaaaaaa/img/%00.png",
   ])("answers 404 for %s", async (url) => {
-    const { app, fake } = harness();
-    const res = await app.request(url);
+    const { request, fake } = harness();
+    const res = await request(url);
     expect(res.status).toBe(404);
     const reached = fake.requests.map((r) => r.url.pathname).filter((p) => p !== "/api/dicts");
     expect(reached.filter((p) => p !== "/res/aaaaaaaaaaaa/missing.png")).toEqual([]);
@@ -169,19 +169,19 @@ describe("GET /res/{dict}/{path}", () => {
 
 describe("upstream failures", () => {
   it("maps a refused token to 502 and logs it", async () => {
-    const { app, fake, lines } = harness();
-    await app.request("/api/dicts");
+    const { request, fake, lines } = harness();
+    await request("/api/dicts");
     fake.forceStatus = 401;
-    const res = await app.request("/api/suggest?q=ca");
+    const res = await request("/api/suggest?q=ca");
     expect(res.status).toBe(502);
     expect(ErrorBody.parse(await res.json()).error.code).toBe("wudict_unavailable");
     expect(lines.some((l) => l.includes("check AUTH_TOKEN"))).toBe(true);
   });
 
   it("maps a down wuDict to 502", async () => {
-    const { app, fake } = harness();
+    const { request, fake } = harness();
     fake.down = true;
-    const res = await app.request("/api/search?q=cat");
+    const res = await request("/api/search?q=cat");
     expect(res.status).toBe(502);
     expect(ErrorBody.parse(await res.json()).error.code).toBe("wudict_unavailable");
   });
@@ -194,8 +194,8 @@ describe("upstream failures", () => {
           reject(new DOMException("aborted", "AbortError"));
         });
       });
-    const { app } = harness({ fetch: hang, headersTimeoutMs: 20 });
-    const res = await app.request("/api/search?q=cat");
+    const { request } = harness({ fetch: hang, headersTimeoutMs: 20 });
+    const res = await request("/api/search?q=cat");
     expect(res.status).toBe(504);
     expect(ErrorBody.parse(await res.json()).error.code).toBe("wudict_timeout");
   });

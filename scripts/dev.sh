@@ -18,6 +18,10 @@
 #   DEV_DATA_DIR     data directory with the /data layout (default .cache/dev-data)
 #   GATEWAY_PORT     gateway port (default 8080)
 #   WUDICT_PORT      wuDict port (default 6888)
+# Every gateway variable (ADMIN_EMAIL, ADMIN_PASSWORD, REGISTRATION, AUTH_*, SMTP_URL, …) is passed
+# through. Without ADMIN_PASSWORD, the first start creates the user "admin" and logs its one-time
+# password; `DATA_DIR=.cache/dev-data npx tsx gateway/src/main.ts user reset-password admin` prints a
+# new one.
 # The ( … ) subshells below scope each process's environment on purpose:
 # shellcheck disable=SC2030,SC2031
 set -euo pipefail
@@ -109,6 +113,13 @@ mkdir -p "$data"/{dictionaries,db,gateway,proposals,tmp} "$data"/.wudict/{config
 
 # A fresh token per run: only the gateway and wuDict know it.
 auth_token="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+# The session secret must survive restarts (or everyone is signed out); kept in the data dir like the
+# image does.
+secret_file="$data/gateway/better-auth-secret"
+if [[ -z "${BETTER_AUTH_SECRET:-}" ]]; then
+  [[ -s "$secret_file" ]] || (umask 077 && od -An -N32 -tx1 /dev/urandom | tr -d ' \n' >"$secret_file")
+  BETTER_AUTH_SECRET="$(<"$secret_file")"
+fi
 
 pids=()
 # shellcheck disable=SC2329 # invoked by the EXIT trap
@@ -152,6 +163,7 @@ log "wuDict on 127.0.0.1:$wudict_port (data: $data)"
     DATA_DIR="$data" \
     WUDICT_URL="http://127.0.0.1:$wudict_port" \
     AUTH_TOKEN="$auth_token" \
+    BETTER_AUTH_SECRET="$BETTER_AUTH_SECRET" \
     PWA_DIR="$repo_root/pwa/dist" \
     LOG_LEVEL="${LOG_LEVEL:-debug}"
   exec "$bin/tsx" watch src/main.ts

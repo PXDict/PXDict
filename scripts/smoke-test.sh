@@ -5,8 +5,10 @@
 #   scripts/smoke-test.sh [image]        (default pxdict:dev)
 #
 # Checks: the PWA (/, /manifest.webmanifest, a client-side route), /healthz, security headers,
-# non-allowlisted wuDict routes answer 404, wuDict listens on loopback only, the token never reaches
-# the logs, and a lookup through the gateway finds a word in a small generated DSL dictionary.
+# non-allowlisted wuDict routes answer 404, wuDict listens on loopback only, secrets never reach the
+# logs, sign-in (the bootstrapped admin and a regular user), the proxy and admin routes refuse
+# requests without the right session, and a lookup through the gateway finds a word in a small
+# generated DSL dictionary.
 # Requirements: docker, curl.
 set -euo pipefail
 shopt -s inherit_errexit
@@ -14,6 +16,9 @@ shopt -s inherit_errexit
 image="${1:-pxdict:dev}"
 name="pxdict-smoke-$$"
 token="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+admin_password="smoke-$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
+user_password="smoke-$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
+jar="$(mktemp -d)"
 failures=0
 
 log() { printf '\033[1;34m[smoke]\033[0m %s\n' "$*" >&2; }
@@ -31,11 +36,16 @@ cleanup() {
     docker logs "$name" 2>&1 | tail -n 50 >&2 || true
   fi
   docker rm -f "$name" >/dev/null 2>&1 || true
+  rm -rf "$jar"
 }
 trap cleanup EXIT
 
 log "starting $image"
-docker run -d --name "$name" -e AUTH_TOKEN="$token" -p 127.0.0.1::8080 "$image" >/dev/null
+# PUBLIC_URL must match the address curl uses (Origin checks); the port is only known after start, so
+# requests send Origin/Host for http://localhost:8080 explicitly.
+docker run -d --name "$name" -e AUTH_TOKEN="$token" -e PUBLIC_URL=http://localhost:8080 \
+  -e ADMIN_EMAIL=admin@example.com -e ADMIN_USERNAME=admin -e ADMIN_PASSWORD="$admin_password" \
+  -p 127.0.0.1::8080 "$image" >/dev/null
 port="$(docker port "$name" 8080/tcp | head -n 1 | sed 's/.*://')"
 base="http://127.0.0.1:$port"
 docker exec "$name" true
@@ -115,20 +125,82 @@ if [[ -n "$ip" ]]; then
   fi
 fi
 
+# as COOKIE-JAR curl-args…: curl with a browser's session cookies and Origin.
+as() {
+  local who="$1"
+  shift
+  curl -sS -b "$jar/$who" -c "$jar/$who" -H "Origin: http://localhost:8080" "$@"
+}
+# as_status COOKIE-JAR URL expected-status [extra curl args…]
+as_status() {
+  local who="$1" url="$2" want="$3" got
+  shift 3
+  got="$(as "$who" -o /dev/null -w '%{http_code}' "$@" "$base$url")"
+  if [[ "$got" == "$want" ]]; then pass "$who: $url → $got"; else fail "$who: $url → $got (want $want)"; fi
+}
+
+log "sessions and roles"
+status "/api/search?q=hello" 401
+status "/api/dicts" 401
+status /app-api/me 401
+status /app-api/admin/invites 401
+body /app-api/auth/methods '"registration":"closed"'
+status /app-api/auth/sign-up/email 403 -X POST -H "Origin: http://localhost:8080" -H 'Content-Type: application/json' \
+  -d '{"email":"x@example.com","password":"long enough password","name":"x"}'
+status /app-api/auth/sign-in/username 403 -X POST -H "Origin: https://evil.example" -H 'Content-Type: application/json' \
+  -d "{\"username\":\"admin\",\"password\":\"$admin_password\"}"
+as_status admin /app-api/auth/sign-in/username 401 -X POST -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"wrong password here"}'
+as_status admin /app-api/auth/sign-in/username 200 -X POST -H 'Content-Type: application/json' \
+  -d "{\"username\":\"admin\",\"password\":\"$admin_password\"}"
+if as admin "$base/app-api/me" | grep -q '"role":"admin"'; then pass "admin: /app-api/me says admin"; else fail "admin: /app-api/me"; fi
+as_status admin /app-api/admin/invites 200
+as_status admin /app-api/auth/admin/create-user 200 -X POST -H 'Content-Type: application/json' \
+  -d "{\"email\":\"reader@example.com\",\"name\":\"Reader\",\"password\":\"$user_password\"}"
+as_status reader /app-api/auth/sign-in/email 200 -X POST -H 'Content-Type: application/json' \
+  -d "{\"email\":\"reader@example.com\",\"password\":\"$user_password\"}"
+as_status reader /app-api/admin/invites 403
+as_status reader /app-api/auth/admin/list-users 403
+as_status reader "/api/search?q=hello" 200
+
+log "rescue CLI"
+if docker exec "$name" node /app/pxdict-gateway.mjs user reset-password reader@example.com | grep -Eq '^[a-zA-Z0-9]{20}$'; then
+  pass "user reset-password prints a new password"
+else
+  fail "user reset-password"
+fi
+# Only the session token: the cookie cache (pxdict.session_data) is valid for up to a minute.
+status /app-api/me 401 -H "Cookie: pxdict.session_token=$(grep -F session_token "$jar/reader" | awk '{print $7}')"
+
 log "a lookup through the gateway"
 printf '#NAME "PXDict Smoke"\n#INDEX_LANGUAGE "English"\n#CONTENTS_LANGUAGE "English"\n\nhello\n\t[m1]a greeting[/m]\nhelp\n\t[m1]assistance[/m]\n' |
   docker exec -i "$name" sh -c 'mkdir -p /data/dictionaries/smoke && cat > /data/dictionaries/smoke/smoke.dsl'
 # New files are not picked up automatically (docs/wudict-notes.md Q10); rescan from inside the container.
 docker exec -e T="$token" "$name" sh -c \
   'wget -q -O /dev/null --header "Authorization: Bearer $T" http://127.0.0.1:6888/api/rescan'
-body /api/dicts '"name":"PXDict Smoke"'
-body /api/dicts '^[^/]*$'
-body "/api/search?q=hello&mode=exact" '"Headword":"hello".*a greeting'
-body "/api/suggest?q=hel" '"words":\["hello","help"\]'
-header "/api/search?q=hello" content-type 'application/x-ndjson'
+# The gateway caches wuDict's dictionary list for a few seconds; wait for the new one.
+for _ in $(seq 1 15); do
+  if as admin "$base/api/dicts" | grep -q '"name":"PXDict Smoke"'; then break; fi
+  sleep 1
+done
+as_body() {
+  local url="$1" pattern="$2" got
+  got="$(as admin "$base$url")"
+  if grep -Eq -- "$pattern" <<<"$got"; then pass "$url matches /$pattern/"; else fail "$url does not match /$pattern/: ${got:0:300}"; fi
+}
+as_body /api/dicts '"name":"PXDict Smoke"'
+as_body /api/dicts '^[^/]*$'
+as_body "/api/search?q=hello&mode=exact" '"Headword":"hello".*a greeting'
+as_body "/api/suggest?q=hel" '"words":\["hello","help"\]'
+got="$(as admin -o /dev/null -D - "$base/api/search?q=hello" | tr -d '\r' | grep -i '^content-type:' || true)"
+if grep -qi 'application/x-ndjson' <<<"$got"; then pass "/api/search content-type"; else fail "/api/search content-type: ${got:-missing}"; fi
 
 log "logs"
-if docker logs "$name" 2>&1 | grep -qF "$token"; then fail "the token appears in the logs"; else pass "the token is not in the logs"; fi
+secret="$(docker exec "$name" cat /data/gateway/better-auth-secret)"
+logs="$(docker logs "$name" 2>&1)"
+for s in "$token" "$secret" "$admin_password" "$user_password"; do
+  if grep -qF -- "$s" <<<"$logs"; then fail "a secret appears in the logs"; else pass "a secret is not in the logs"; fi
+done
 
 if ((failures)); then
   log "$failures check(s) failed"
