@@ -1,5 +1,6 @@
 // Builds a gateway app for tests: in-memory database, real Better Auth, fake wuDict, optional PWA
 // folder, and clients that keep cookies like a browser.
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "../app";
 import { createAuth } from "../auth/auth";
@@ -32,6 +33,13 @@ export interface HarnessOptions {
   mail?: boolean;
   /** Better Auth's rate limiter (off by default so tests can sign in repeatedly). */
   rateLimit?: boolean;
+  /**
+   * DATA_DIR (a temp folder) for tests that touch files; the fake wuDict then scans its dictionaries/
+   * on /api/rescan and writes db/<name>/info.txt on /api/ingest.
+   */
+  dataDir?: string;
+  /** Free bytes reported for the volume (default: plenty). */
+  freeBytes?: () => number;
 }
 
 type Init = Omit<RequestInit, "headers"> & { headers?: Record<string, string> };
@@ -89,13 +97,17 @@ export interface NewUser {
 export function harness(opts: HarnessOptions = {}) {
   const lines: string[] = [];
   const logger = createLogger("debug", (l) => lines.push(l));
-  const fake = new FakeWudict({ token: testToken });
+  const fake = new FakeWudict({
+    token: testToken,
+    ...(opts.dataDir ? { dictDir: path.join(opts.dataDir, "dictionaries"), dbDir: path.join(opts.dataDir, "db") } : {}),
+  });
   const db = openDatabase({ file: ":memory:", migrationsDir });
   const config = loadConfig({
     AUTH_TOKEN: testToken,
     BETTER_AUTH_SECRET: testSecret,
     PUBLIC_URL: testOrigin,
     CLIENT_IP_HEADER: "x-test-client-ip",
+    ...(opts.dataDir ? { DATA_DIR: opts.dataDir } : {}),
     ...opts.env,
   });
   const mailer = opts.mail ? new MemoryMailer() : undefined;
@@ -116,6 +128,7 @@ export function harness(opts: HarnessOptions = {}) {
     emailEnabled: mailer !== undefined,
     wudict,
     catalog,
+    freeBytes: () => Promise.resolve(opts.freeBytes?.() ?? 100e9),
     ...(opts.pwaDir ? { pwaDir: opts.pwaDir } : {}),
   });
   /** Requests the fake wuDict received for one path. */

@@ -57,6 +57,7 @@ describe.skipIf(!bin)("contract with the real wuDict", () => {
   /** The gateway without any session (as a sandboxed iframe calls it). */
   let anonymous: { request: (path: string) => Response | Promise<Response> };
   let dictId: string;
+  let h: ReturnType<typeof harness>;
 
   beforeAll(async () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "pxdict-contract-"));
@@ -100,7 +101,8 @@ describe.skipIf(!bin)("contract with the real wuDict", () => {
     }
 
     const client = new WudictClient({ baseUrl: base, token });
-    const h = harness({ wudict: client });
+    // DATA_DIR is wuDict's data folder, as in the image (proposals move into its DICT_DIR).
+    h = harness({ wudict: client, dataDir: dir });
     // Signed in as a regular user, as the PWA would be.
     app = { request: h.request };
     anonymous = h.app;
@@ -179,6 +181,35 @@ describe.skipIf(!bin)("contract with the real wuDict", () => {
     // The session-protected path refuses the same request without a session.
     expect((await anonymous.request(`/res/${dictId}/pic.png`)).status).toBe(401);
   });
+
+  it("an approved proposal is rescanned, indexed and searchable (Phase 6, Q10)", async () => {
+    const proposed = dsl.replace("PXDict Contract", "PXDict Proposal").replace("hello", "proposal");
+    const user = (await h.signedIn({ email: "proposer@example.com" })).client;
+    const created = await user.post("/app-api/proposals", { title: "Proposal", files: [{ name: "proposal.dsl", size: Buffer.byteLength(proposed) }] });
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+    const put = await user.request(`/app-api/proposals/${id}/files/0`, { method: "PUT", headers: { "Upload-Offset": "0" }, body: proposed });
+    expect(put.status).toBe(200);
+    const submitted = await user.post(`/app-api/proposals/${id}/submit`, {});
+    expect(await submitted.json()).toMatchObject({ status: "pending", metadata: { format: "dsl", title: "PXDict Proposal" } });
+
+    const admin = (await h.signedIn({ email: "admin@example.com", role: "admin" })).client;
+    const approved = await admin.post(`/app-api/admin/proposals/${id}/approve`, { dictId: "proposed", scope: "global" });
+    expect(approved.status).toBe(202);
+    await h.app.services.publisher.publish("proposed");
+    expect(h.app.services.publisher.status("proposed")).toMatchObject({ state: "done", error: null });
+
+    const row = h.app.services.registry.get("proposed");
+    expect(row).toMatchObject({ visibility: "global", source: "proposal", mediaPacked: true });
+    expect(row?.wudictId).toMatch(/^[0-9a-f]{12}$/);
+    // The uuid comes from the real db/<name>/info.txt.
+    expect(row?.wudictUuid).toBeTruthy();
+    expect(row?.libraryDir).toBeTruthy();
+
+    const lines = await ndjsonLines(await user.request("/api/search?q=proposal&mode=exact"));
+    const hit = lines.find((l) => l.t === "hit" && l.dict === row?.wudictId);
+    expect(hit).toMatchObject({ name: "Proposal", results: [{ Headword: "proposal" }] });
+  }, 30_000);
 
   it("an unknown resource is a 404", async () => {
     expect((await app.request(`/res/${dictId}/missing.png`)).status).toBe(404);

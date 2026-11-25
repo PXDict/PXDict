@@ -1,5 +1,8 @@
 // A fake wuDict for tests: the handful of routes the gateway proxies, with wuDict's response shapes
 // (docs/wudict-notes.md). Real behaviour is checked by contract.test.ts against the actual binary.
+import { createHash, randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { Hono } from "hono";
 
 export interface FakeDict {
@@ -9,11 +12,19 @@ export interface FakeDict {
   entries: Record<string, string>;
   /** resource path → body */
   resources?: Record<string, string>;
+  /** Absolute path of the main file; default /data/dictionaries/<name>/<name>.mdx. */
+  sourcePath?: string;
+  /** False until /api/ingest ran (no dbPath/folder in /api/dicts); default true. */
+  indexed?: boolean;
 }
 
 export interface FakeWudictOptions {
   token: string;
   dicts?: FakeDict[];
+  /** DICT_DIR scanned by /api/rescan (main files .mdx/.dsl at any depth); omitted: rescan adds nothing. */
+  dictDir?: string;
+  /** DB_DIR where /api/ingest writes <name>/info.txt with a uuid. */
+  dbDir?: string;
 }
 
 export interface RecordedRequest {
@@ -39,13 +50,38 @@ export class FakeWudict {
   forceStatus: number | undefined;
   /** When set, every request fails as if wuDict were down. */
   down = false;
+  /** When set, /api/ingest streams this error instead of finishing. */
+  ingestError: string | undefined;
   readonly #app = new Hono();
   readonly #token: string;
+  readonly #dictDir: string | undefined;
+  readonly #dbDir: string | undefined;
 
-  constructor({ token, dicts = fakeDicts }: FakeWudictOptions) {
+  constructor({ token, dicts = fakeDicts, dictDir, dbDir }: FakeWudictOptions) {
     this.#token = token;
-    this.dicts = dicts;
+    // A copy: rescans add to it, and the default list is shared by every test.
+    this.dicts = [...dicts];
+    this.#dictDir = dictDir;
+    this.#dbDir = dbDir;
     this.#routes();
+  }
+
+  /** Adds main files found under DICT_DIR that are not listed yet (wuDict's rescan). */
+  #rescan(): void {
+    const root = this.#dictDir;
+    if (!root || !fs.existsSync(root)) return;
+    const walk = (dir: string): string[] =>
+      fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) return walk(full);
+        return /\.(mdx|dsl)$/i.test(e.name) ? [full] : [];
+      });
+    for (const file of walk(root)) {
+      if (this.dicts.some((d) => d.sourcePath === file)) continue;
+      const id = createHash("sha256").update(file).digest("hex").slice(0, 12);
+      const name = path.basename(file).replace(/\.[^.]+$/, "");
+      this.dicts.push({ id, name, entries: { hello: `hello from ${name}` }, sourcePath: file, indexed: false });
+    }
   }
 
   /** A fetch implementation to pass to WudictClient. */
@@ -76,8 +112,33 @@ export class FakeWudict {
       });
     const authorized = (h: string | undefined) => h === `Bearer ${this.#token}`;
 
+    app.get("/api/rescan", (c) => {
+      if (!authorized(c.req.header("Authorization"))) return c.json({ error: "access key required" }, 401);
+      this.#rescan();
+      return ndjson([{ t: "begin", total: this.dicts.length }, { t: "end", etag: '"rescan"' }]);
+    });
+
+    app.get("/api/ingest", (c) => {
+      if (!authorized(c.req.header("Authorization"))) return c.json({ error: "access key required" }, 401);
+      const d = this.dicts.find((x) => x.id === c.req.query("dict"));
+      if (!d) return c.json({ error: "unknown dictionary id" }, 404);
+      const events = ["event: progress\ndata: {\"done\":1,\"total\":2}\n\n"];
+      if (this.ingestError) {
+        events.push(`event: error\ndata: ${JSON.stringify({ error: this.ingestError })}\n\n`);
+      } else {
+        d.indexed = true;
+        if (this.#dbDir) {
+          fs.mkdirSync(path.join(this.#dbDir, d.name), { recursive: true });
+          fs.writeFileSync(path.join(this.#dbDir, d.name, "info.txt"), `name = ${d.name}\nuuid = ${randomUUID()}\nmedia = packed\n`);
+          fs.writeFileSync(path.join(this.#dbDir, d.name, "text.db"), "x".repeat(100));
+        }
+        events.push("event: progress\ndata: {\"done\":2,\"total\":2}\n\n", `event: done\ndata: {"id":"${d.id}"}\n\n`);
+      }
+      return c.body(events.join(""), 200, { "Content-Type": "text/event-stream" });
+    });
+
     app.get("/api/dicts", (c) => {
-      const etag = `"${this.dicts.map((d) => d.id).join("-")}"`;
+      const etag = `"${this.dicts.map((d) => `${d.id}${d.indexed === false ? "u" : ""}`).join("-")}"`;
       if (c.req.header("If-None-Match") === etag) return c.body(null, 304);
       return ndjson([
         { t: "begin", total: this.dicts.length + 1, groupsProblems: 0 },
@@ -87,10 +148,9 @@ export class FakeWudict {
             id: d.id,
             name: d.name,
             format: "mdx",
-            path: `/data/dictionaries/${d.name}/${d.name}.mdx`,
-            source: `/data/dictionaries/${d.name}/${d.name}.mdx`,
-            dbPath: `/data/db/${d.name}/text.db`,
-            folder: `/data/db/${d.name}`,
+            path: d.sourcePath ?? `/data/dictionaries/${d.name}/${d.name}.mdx`,
+            source: d.sourcePath ?? `/data/dictionaries/${d.name}/${d.name}.mdx`,
+            ...(d.indexed === false ? {} : { dbPath: `/data/db/${d.name}/text.db`, folder: `/data/db/${d.name}` }),
             entries: Object.keys(d.entries).length,
             caps: { Exact: true, Prefix: true },
             groups: [{ id: "g", name: "global group" }],

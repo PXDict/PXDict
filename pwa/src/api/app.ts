@@ -2,8 +2,16 @@
 // @pxdict/shared, the zod schemas the gateway validates with; only types are imported, so zod is not
 // bundled. Better Auth's endpoints (/app-api/auth/*) are wrapped in ./auth and re-exported here.
 import type {
+  AdminDict,
+  AdminDictList,
+  AdminProposal,
+  AdminProposalList,
+  ApproveProposalRequest,
   AuthMethods,
+  ChunkResponse,
   ClaimInviteRequest,
+  CreateProposalRequest,
+  IndexStatus,
   Favorite,
   FavoriteList,
   Health,
@@ -13,16 +21,42 @@ import type {
   MyDict,
   MyDictList,
   NewDict,
+  Proposal,
+  ProposalList,
+  ProposalStatus,
+  ProposalUpdate,
+  RejectProposalRequest,
   SaveFavoriteRequest,
+  UpdateAdminDictRequest,
   UpdateMyDictsRequest,
   UpdateSettingsRequest,
+  UploadLimits,
   UserSettings,
 } from "@pxdict/shared";
 import { send, toApiError } from "./http";
 
 export { ApiError, isNetworkError, onUnauthorized } from "./http";
 export * from "./auth";
-export type { AuthMethods, Favorite, Health, HistoryEntry, HistoryPage, Me, MyDict, NewDict, UserSettings };
+export type {
+  AdminDict,
+  AdminProposal,
+  ApproveProposalRequest,
+  AuthMethods,
+  Favorite,
+  Health,
+  HistoryEntry,
+  HistoryPage,
+  IndexStatus,
+  Me,
+  MyDict,
+  NewDict,
+  Proposal,
+  ProposalStatus,
+  ProposalUpdate,
+  UpdateAdminDictRequest,
+  UploadLimits,
+  UserSettings,
+};
 
 const opts = (signal?: AbortSignal): RequestInit => (signal ? { signal } : {});
 
@@ -139,4 +173,96 @@ export function saveFavorite(f: SaveFavoriteRequest): Promise<void> {
 /** DELETE /app-api/me/favorites */
 export function deleteFavorite(headword: string, dictId: string): Promise<void> {
   return sendEmpty("DELETE", `/app-api/me/favorites?${new URLSearchParams({ headword, dict: dictId }).toString()}`);
+}
+
+// Dictionary proposals (ADR 0008)
+
+/** GET /app-api/proposals/limits: sizes, chunk size and accepted file types. */
+export function getUploadLimits(signal?: AbortSignal): Promise<UploadLimits> {
+  return getJson<UploadLimits>("/app-api/proposals/limits", signal);
+}
+
+/** POST /app-api/proposals: metadata + file list; files are sent next with uploadChunk. */
+export function createProposal(req: CreateProposalRequest): Promise<Proposal> {
+  return sendJson<Proposal>("POST", "/app-api/proposals", req);
+}
+
+/** PUT /app-api/proposals/{id}/files/{index}: one chunk at `offset` (the bytes stored so far). */
+export async function uploadChunk(id: string, index: number, offset: number, chunk: Blob, signal?: AbortSignal): Promise<ChunkResponse> {
+  const res = await send(`/app-api/proposals/${id}/files/${String(index)}`, {
+    method: "PUT",
+    headers: { "Upload-Offset": String(offset), "Content-Type": "application/offset+octet-stream" },
+    body: chunk,
+    ...opts(signal),
+  });
+  if (!res.ok) throw await toApiError(res);
+  return (await res.json()) as ChunkResponse;
+}
+
+/** GET /app-api/proposals/{id}: one of the user's proposals (how much of each file arrived). */
+export function getProposal(id: string, signal?: AbortSignal): Promise<Proposal> {
+  return getJson<Proposal>(`/app-api/proposals/${id}`, signal);
+}
+
+/** POST /app-api/proposals/{id}/submit: the server checks the files; the proposal waits for review. */
+export function submitProposal(id: string): Promise<Proposal> {
+  return sendJson<Proposal>("POST", `/app-api/proposals/${id}/submit`, {});
+}
+
+/** DELETE /app-api/proposals/{id}: withdraws it; its files are deleted at once. */
+export function withdrawProposal(id: string): Promise<void> {
+  return sendEmpty("DELETE", `/app-api/proposals/${id}`);
+}
+
+/** GET /app-api/me/proposals, newest first. */
+export async function getMyProposals(signal?: AbortSignal): Promise<Proposal[]> {
+  return (await getJson<ProposalList>("/app-api/me/proposals", signal)).proposals;
+}
+
+/** POST /app-api/me/proposals/seen: stops announcing approvals and rejections. */
+export function markProposalsSeen(): Promise<void> {
+  return sendEmpty("POST", "/app-api/me/proposals/seen");
+}
+
+// Admin: proposals and dictionaries
+
+/** GET /app-api/admin/proposals */
+export async function getAdminProposals(status?: ProposalStatus, signal?: AbortSignal): Promise<AdminProposal[]> {
+  const qs = status ? `?status=${status}` : "";
+  return (await getJson<AdminProposalList>(`/app-api/admin/proposals${qs}`, signal)).proposals;
+}
+
+/** POST /app-api/admin/proposals/{id}/approve: indexing then runs in the background. */
+export function approveProposal(id: string, req: ApproveProposalRequest): Promise<AdminProposal> {
+  return sendJson<AdminProposal>("POST", `/app-api/admin/proposals/${id}/approve`, req);
+}
+
+/** POST /app-api/admin/proposals/{id}/reject: deletes the files, keeps the reason for the proposer. */
+export function rejectProposal(id: string, note: string): Promise<AdminProposal> {
+  return sendJson<AdminProposal>("POST", `/app-api/admin/proposals/${id}/reject`, { note } satisfies RejectProposalRequest);
+}
+
+/** GET /app-api/admin/dicts */
+export async function getAdminDicts(signal?: AbortSignal): Promise<AdminDict[]> {
+  return (await getJson<AdminDictList>("/app-api/admin/dicts", signal)).dicts;
+}
+
+/** POST /app-api/admin/dicts/rescan: wuDict reads its dictionary folder again. */
+export async function rescanDicts(): Promise<AdminDict[]> {
+  return (await sendJson<AdminDictList>("POST", "/app-api/admin/dicts/rescan", {})).dicts;
+}
+
+/** PATCH /app-api/admin/dicts/{id} */
+export function updateAdminDict(id: string, change: UpdateAdminDictRequest): Promise<AdminDict> {
+  return sendJson<AdminDict>("PATCH", `/app-api/admin/dicts/${id}`, change);
+}
+
+/** GET /app-api/admin/dicts/{id}/index-status */
+export function getIndexStatus(id: string, signal?: AbortSignal): Promise<IndexStatus> {
+  return getJson<IndexStatus>(`/app-api/admin/dicts/${id}/index-status`, signal);
+}
+
+/** POST /app-api/admin/dicts/{id}/index: indexes it again (after an error). */
+export function reindexDict(id: string): Promise<IndexStatus> {
+  return sendJson<IndexStatus>("POST", `/app-api/admin/dicts/${id}/index`, {});
 }

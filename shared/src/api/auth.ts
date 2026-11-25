@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { NewDict, UserSettings } from "./me";
+import { ProposalUpdate } from "./proposals";
 
 export const RegistrationMode = z.enum(["closed", "invite", "open"]);
 export type RegistrationMode = z.infer<typeof RegistrationMode>;
@@ -71,6 +72,8 @@ export const Me = z.object({
   settings: UserSettings,
   /** Dictionaries added since the user last acknowledged them (POST /app-api/me/dicts/seen). */
   newDicts: z.array(NewDict),
+  /** Proposals approved or rejected since the user last acknowledged (POST /app-api/me/proposals/seen). */
+  proposalUpdates: z.array(ProposalUpdate),
 });
 export type Me = z.infer<typeof Me>;
 

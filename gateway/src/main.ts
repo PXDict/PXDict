@@ -118,7 +118,12 @@ async function main(): Promise<void> {
     ...(pwaFound ? { pwaDir: config.pwaDir } : {}),
   });
 
-  const stopJobs = startJobs({ db, logger, historyDefaultRetentionDays: config.historyDefaultRetentionDays });
+  const stopJobs = startJobs({
+    db,
+    logger,
+    historyDefaultRetentionDays: config.historyDefaultRetentionDays,
+    proposals: app.services.proposals,
+  });
 
   const server = serve(
     { fetch: app.fetch, port: config.listen.port, ...(config.listen.host ? { hostname: config.listen.host } : {}) },

@@ -128,11 +128,12 @@ PXDict/
 │   │   ├── db/                 # Drizzle schema + client (Phase 2)
 │   │   ├── auth/               # Better Auth instance, plugins, guards (Phase 3)
 │   │   ├── wudict/             # client, proxy, route allowlist, test fake (Phase 2)
-│   │   ├── dicts/              # dictionary catalogue + per-user lists (Phase 5, ADR 0007)
+│   │   ├── dicts/              # catalogue + per-user lists (ADR 0007), publisher: rescan + ingest (ADR 0008)
 │   │   ├── me/                 # /app-api/me/* routes (Phase 5)
 │   │   ├── history/ favorites/ settings/   # per-user stores (Phase 5)
 │   │   ├── audit/              # audit_log writer
-│   │   └── proposals/ storage/ (later phases)
+│   │   ├── proposals/          # uploads, checks (zip limits, headers), review (Phase 6, ADR 0008)
+│   │   └── storage/            # safe-path.ts (safeJoin), disk usage; storage admin later (Phase 7)
 │   └── drizzle/                # generated SQL migrations (append-only)
 ├── pwa/                        # @pxdict/pwa: Vite + Preact + TypeScript
 │   └── src/

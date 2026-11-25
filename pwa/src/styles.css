@@ -611,3 +611,107 @@ textarea {
   display: flex;
   gap: 0.25rem;
 }
+
+/* Proposals and admin review (Phase 6) */
+.proposal-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.proposal-list .card {
+  padding: 0.75rem 1rem;
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+.proposal-list .row {
+  align-items: center;
+}
+
+.badge-approved {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.badge-rejected,
+.badge-warn {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.subnav {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.subnav a[aria-current="page"] {
+  font-weight: 600;
+}
+
+.field.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+progress {
+  width: min(16rem, 100%);
+  vertical-align: middle;
+}
+
+.prewrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+dl.meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.25rem 1rem;
+  margin: 0;
+}
+
+dl.meta dt {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+dl.meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+table.files {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+  display: block;
+  overflow-x: auto;
+}
+
+table.files td {
+  padding: 0.2rem 0.5rem 0.2rem 0;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.warnings {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: var(--danger);
+}
+
+.review-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.field textarea {
+  width: 100%;
+  box-sizing: border-box;
+}

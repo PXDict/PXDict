@@ -35,10 +35,10 @@ Typecheck and lint run from the repository root (`npm run typecheck`, `npm run l
 | `AUTH_<PROVIDER>_CLIENT_ID`, `AUTH_<PROVIDER>_CLIENT_SECRET` | — | Social sign-in for `GOOGLE`, `GITHUB`, `MICROSOFT` (+ `AUTH_MICROSOFT_TENANT_ID`), `APPLE`, `DISCORD`, `FACEBOOK`, `GITLAB` (+ `AUTH_GITLAB_ISSUER`). Redirect URI: `${PUBLIC_URL}/app-api/auth/callback/<provider>` |
 | `AUTH_OIDC_<NAME>_ISSUER`, `_CLIENT_ID`, `_CLIENT_SECRET`, `_LABEL` | — | Any OpenID Connect provider (discovery from the issuer). `<NAME>`: upper-case letters/digits; redirect URI `${PUBLIC_URL}/app-api/auth/callback/<name>` |
 | `CLIENT_IP_HEADER` | — (TCP peer) | Header with the client address set by a trusted proxy, e.g. `cf-connecting-ip` or `x-forwarded-for` (last entry). Rate limits use it |
-| `MAX_UPLOAD_BYTES` | `500MB` | Largest dictionary proposal; sizes accept `B`, `kB`/`MB`/`GB`/`TB`, `KiB`/`MiB`/`GiB`/`TiB` (Phase 6) |
-| `MAX_PENDING_PROPOSALS_PER_USER` | `3` | Pending proposals per user (Phase 6) |
-| `MAX_PENDING_BYTES` | `5GB` | Total size of all pending proposals (Phase 6) |
-| `MIN_FREE_BYTES` | `1GB` | Uploads are refused below this much free disk (Phase 6) |
+| `MAX_UPLOAD_BYTES` | `500MB` | Largest dictionary proposal (all its files); sizes accept `B`, `kB`/`MB`/`GB`/`TB`, `KiB`/`MiB`/`GiB`/`TiB`. A zip may unpack to at most 4× this. [ADR 0008](../docs/adr/0008-dictionary-proposals.md) |
+| `MAX_PENDING_PROPOSALS_PER_USER` | `3` | Proposals a user may have uploading or waiting for review; `0` turns proposals off |
+| `MAX_PENDING_BYTES` | `5GB` | Total size of all proposals uploading or waiting for review |
+| `MIN_FREE_BYTES` | `1GB` | Proposals are refused when the volume would have less free space |
 | `HISTORY_DEFAULT_RETENTION_DAYS` | `90` | Search-history retention for users who did not choose one, `0` = forever |
 | `BUILTIN_DICT_VISIBILITY` | `global` | Who sees a dictionary found in `DICT_DIR` without a proposal (copied in by the operator): `global` (everyone) or `hidden` (nobody until an admin publishes it). [ADR 0007](../docs/adr/0007-per-user-dictionaries-and-history.md) |
 
@@ -62,6 +62,17 @@ delete, export). The gateway keeps its own `dictionaries` table in step with wuD
 ids stay the same when wuDict's path-hash ids change. The proxy searches each user's enabled
 dictionaries in their order and records `search_history`. An hourly job applies history retention.
 
+## Proposals
+
+Users propose dictionaries through `/app-api/proposals` ([ADR 0008](../docs/adr/0008-dictionary-proposals.md)):
+create with metadata and the file list, `PUT …/files/{index}` chunks of at most 32 MiB with an
+`Upload-Offset` header (resumable), then `submit`, which unpacks a zip with zip-bomb limits, checks names
+and types, reads the main file's header and moves the files into `/data/proposals/<id>/`. Admins review
+them under `/app-api/admin/proposals`; approving moves the files into `/data/dictionaries/<dictId>/` and
+indexes them in the background (rescan + ingest) before users see the dictionary. Rejecting or
+withdrawing deletes the files at once. `/app-api/admin/dicts` changes visibility, owner, title and trusted
+rendering, rescans, and retries indexing. The hourly job drops uploads unfinished for 24 hours.
+
 Rescue (e.g. a forgotten admin password), from the container or with `DATA_DIR` set:
 
 ```bash
@@ -84,9 +95,12 @@ It prints a new random password and signs that user out everywhere.
 | `src/http/origin.ts`, `client-ip.ts` | Origin check for writes; the client address handed to Better Auth |
 | `src/audit/audit.ts` | `audit_log` writer |
 | `src/me/routes.ts` | `/app-api/me` and `/app-api/me/*` (settings, history, dictionaries, favorites, exports) |
-| `src/dicts/registry.ts` | The dictionary catalogue: sync with wuDict's listing, per-user lists (`user_dicts`), the proxy's access decisions |
+| `src/dicts/registry.ts` | The dictionary catalogue: sync with wuDict's listing (and `uuid` from `info.txt`), per-user lists (`user_dicts`), the proxy's access decisions (admins may name any dictionary) |
 | `src/history/`, `src/favorites/`, `src/settings/` | Stores for search history (with retention cleanup), saved words and user settings |
-| `src/jobs.ts` | Background jobs (hourly history cleanup) |
+| `src/dicts/publisher.ts` | Rescan + ingest (SSE) of a newly approved dictionary, then its visibility; indexing status |
+| `src/proposals/` | Proposal service (uploads, quotas, submit checks, approve/reject, cleanup), file types, header readers, zip limits, routes |
+| `src/storage/safe-path.ts` | `safeJoin` (no traversal, no symlinks), safe removal, disk usage, free space |
+| `src/jobs.ts` | Background jobs (hourly history cleanup, abandoned proposal uploads) |
 | `src/db/` | SQLite (`better-sqlite3`, WAL) + Drizzle schema (`schema.ts`; `auth-schema.ts` is generated); migrations in `drizzle/` |
 | `src/wudict/routes.ts` | **The allowlist** of proxied wuDict routes and their query parameters |
 | `src/wudict/proxy.ts` | The proxy: Bearer token, header allowlists, NDJSON filtering, error mapping |

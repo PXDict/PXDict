@@ -67,6 +67,7 @@ export const me: Me = {
     fontSize: "medium",
   },
   newDicts: [],
+  proposalUpdates: [],
 };
 
 export const unauthorized = () =>

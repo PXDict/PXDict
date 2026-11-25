@@ -1,5 +1,6 @@
 // Builds the gateway's Hono app: security headers, /healthz, Better Auth under /app-api/auth, PXDict's
 // /app-api, the allowlisted wuDict proxy (behind a session check) and the static PWA.
+import path from "node:path";
 import type { Health } from "@pxdict/shared";
 import { Hono, type MiddlewareHandler } from "hono";
 import { authBasePath, clientIpHeader, type Auth } from "./auth/auth";
@@ -13,10 +14,13 @@ import { originCheck } from "./http/origin";
 import { securityHeaders } from "./http/security";
 import type { Logger } from "./log";
 import { mountPwa } from "./static/pwa";
+import { DictPublisher } from "./dicts/publisher";
 import { DictRegistry } from "./dicts/registry";
 import { FavoritesStore } from "./favorites/favorites";
 import { HistoryStore } from "./history/history";
 import { createMeRoutes } from "./me/routes";
+import { createProposalRoutes } from "./proposals/routes";
+import { ProposalService } from "./proposals/service";
 import { SettingsStore } from "./settings/settings";
 import type { WudictCatalog } from "./wudict/catalog";
 import type { WudictClient } from "./wudict/client";
@@ -34,7 +38,9 @@ export interface AppOptions {
   emailEnabled: boolean;
   wudict: WudictClient;
   /** wuDict's dictionary list, reconciled with the gateway's catalogue (dicts/registry.ts). */
-  catalog: Pick<WudictCatalog, "snapshot">;
+  catalog: Pick<WudictCatalog, "snapshot" | "invalidate">;
+  /** Free bytes on the data volume; replaced in tests. */
+  freeBytes?: (dir: string) => Promise<number>;
   /** Built PWA; omitted in tests that do not need it. */
   pwaDir?: string;
 }
@@ -51,7 +57,14 @@ const authAdminExceptions = new Set([`${authBasePath}/admin/stop-impersonating`]
 /** Time allowed for wuDict to answer the health check. */
 const healthTimeoutMs = 3_000;
 
-export function createApp(opts: AppOptions): Hono<AuthEnv> {
+/** Long-lived services that background jobs (jobs.ts) share with the routes. */
+export interface AppServices {
+  proposals: ProposalService;
+  publisher: DictPublisher;
+  registry: DictRegistry;
+}
+
+export function createApp(opts: AppOptions): Hono<AuthEnv> & { services: AppServices } {
   const { version, config, logger, db, wudict, auth } = opts;
   const app = new Hono<AuthEnv>();
   const guards = createGuards(auth, { requireAdmin2fa: config.auth.requireAdmin2fa });
@@ -97,7 +110,27 @@ export function createApp(opts: AppOptions): Hono<AuthEnv> {
     return auth.handler(new Request(c.req.raw, { headers }));
   });
 
-  const registry = new DictRegistry({ db, catalog: opts.catalog, logger, builtinVisibility: config.builtinDictVisibility });
+  const registry = new DictRegistry({
+    db,
+    catalog: opts.catalog,
+    logger,
+    builtinVisibility: config.builtinDictVisibility,
+    dbDir: path.join(config.dataDir, "db"),
+  });
+  const publisher = new DictPublisher({ db, client: wudict, catalog: opts.catalog, registry, dbDir: path.join(config.dataDir, "db"), logger });
+  const proposals = new ProposalService({
+    db,
+    dataDir: config.dataDir,
+    limits: {
+      maxUploadBytes: config.maxUploadBytes,
+      maxPendingProposalsPerUser: config.maxPendingProposalsPerUser,
+      maxPendingBytes: config.maxPendingBytes,
+      minFreeBytes: config.minFreeBytes,
+    },
+    logger,
+    publisher,
+    ...(opts.freeBytes ? { freeBytes: opts.freeBytes } : {}),
+  });
   const settings = new SettingsStore(db, config.historyDefaultRetentionDays);
   const history = new HistoryStore(db);
   app.route(
@@ -110,7 +143,12 @@ export function createApp(opts: AppOptions): Hono<AuthEnv> {
       settings,
       history,
       favorites: new FavoritesStore(db),
+      proposals,
     }),
+  );
+  app.route(
+    "/",
+    createProposalRoutes({ db, guards, publicOrigin: config.publicUrl.origin, logger, proposals, registry, publisher }),
   );
 
   app.all("/app-api/*", (c) => jsonError(c, 404, "not_found", "no such endpoint"));
@@ -140,5 +178,5 @@ export function createApp(opts: AppOptions): Hono<AuthEnv> {
     return jsonError(c, 500, "internal", "internal server error");
   });
 
-  return app;
+  return Object.assign(app, { services: { proposals, publisher, registry } });
 }
