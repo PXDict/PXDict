@@ -22,7 +22,7 @@ describe("GET /api/dicts", () => {
     const dicts = lines.filter((l) => l.t === "dict").map((l) => l.dict as Record<string, unknown>);
     expect(dicts.map((d) => d.id)).toEqual(["aaaaaaaaaaaa", "bbbbbbbbbbbb"]);
     for (const d of dicts) {
-      expect(Object.keys(d).sort()).toEqual(["caps", "entries", "format", "id", "name", "trustedRender"]);
+      expect(Object.keys(d).sort()).toEqual(["caps", "dictId", "enabled", "entries", "format", "id", "name", "trustedRender"]);
     }
     expect(JSON.stringify(lines)).not.toContain("/data/");
     expect(dicts.every((d) => d.trustedRender === false)).toBe(true);

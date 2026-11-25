@@ -13,7 +13,8 @@ export type SearchResult = Schemas["Result"];
 
 /**
  * A /api/dicts row as the gateway sends it: wuDict's allowlisted fields (no filesystem paths, no
- * groups) plus PXDict's `trustedRender` (the dictionary may render same-origin, style A).
+ * groups), `name` replaced by PXDict's title, plus PXDict's `dictId` (its stable dictionary id),
+ * `enabled` (in the user's default set) and `trustedRender` (may render same-origin, style A).
  */
 export type GatewayDict = Pick<DictInfo, "id" | "name" | "format" | "entries" | "caps"> &
   Partial<
@@ -30,7 +31,7 @@ export type GatewayDict = Pick<DictInfo, "id" | "name" | "format" | "entries" | 
       | "hasMedia"
       | "articleLang"
     >
-  > & { trustedRender: boolean };
+  > & { dictId: string; enabled: boolean; trustedRender: boolean };
 
 // The generated schema names its discriminators after the schema ("SearchHit"); on the wire `t` is
 // "begin" | "dict" | "busy" | "hit" | "morph" | "end". These types use the wire values.

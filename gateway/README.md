@@ -39,7 +39,8 @@ Typecheck and lint run from the repository root (`npm run typecheck`, `npm run l
 | `MAX_PENDING_PROPOSALS_PER_USER` | `3` | Pending proposals per user (Phase 6) |
 | `MAX_PENDING_BYTES` | `5GB` | Total size of all pending proposals (Phase 6) |
 | `MIN_FREE_BYTES` | `1GB` | Uploads are refused below this much free disk (Phase 6) |
-| `HISTORY_DEFAULT_RETENTION_DAYS` | `90` | Default search-history retention, `0` = forever (Phase 5) |
+| `HISTORY_DEFAULT_RETENTION_DAYS` | `90` | Search-history retention for users who did not choose one, `0` = forever |
+| `BUILTIN_DICT_VISIBILITY` | `global` | Who sees a dictionary found in `DICT_DIR` without a proposal (copied in by the operator): `global` (everyone) or `hidden` (nobody until an admin publishes it). [ADR 0007](../docs/adr/0007-per-user-dictionaries-and-history.md) |
 
 Every invalid variable is reported at once on startup; secrets are never echoed.
 
@@ -50,6 +51,16 @@ Better Auth serves `/app-api/auth/*` ([ADR 0004](../docs/adr/0004-typescript-gat
 `GET /app-api/auth/methods` (what the login screen offers), `POST /app-api/auth/invite {code}`,
 `GET /app-api/me` and `/app-api/admin/invites`. Every proxied wuDict route needs a session, and every
 `/app-api/admin/*` path and Better Auth admin endpoint needs an admin. Writes need `Origin: PUBLIC_URL`.
+
+## Per-user data
+
+`/app-api/me/*` ([ADR 0007](../docs/adr/0007-per-user-dictionaries-and-history.md)) is always scoped to
+the session's user: `settings` (GET/PUT), `history` (list, filter, distinct queries, delete one/all,
+`export?format=csv|json`), `dicts` (the dictionaries the user may use with their order and enabled flags,
+PUT to change them, `POST dicts/seen` to acknowledge new ones) and `favorites` (list, save with a note,
+delete, export). The gateway keeps its own `dictionaries` table in step with wuDict's listing, so PXDict
+ids stay the same when wuDict's path-hash ids change. The proxy searches each user's enabled
+dictionaries in their order and records `search_history`. An hourly job applies history retention.
 
 Rescue (e.g. a forgotten admin password), from the container or with `DATA_DIR` set:
 
@@ -72,10 +83,14 @@ It prints a new random password and signs that user out everywhere.
 | `src/auth/invites.ts`, `bootstrap.ts` | Invite codes; first admin and the rescue CLI |
 | `src/http/origin.ts`, `client-ip.ts` | Origin check for writes; the client address handed to Better Auth |
 | `src/audit/audit.ts` | `audit_log` writer |
+| `src/me/routes.ts` | `/app-api/me` and `/app-api/me/*` (settings, history, dictionaries, favorites, exports) |
+| `src/dicts/registry.ts` | The dictionary catalogue: sync with wuDict's listing, per-user lists (`user_dicts`), the proxy's access decisions |
+| `src/history/`, `src/favorites/`, `src/settings/` | Stores for search history (with retention cleanup), saved words and user settings |
+| `src/jobs.ts` | Background jobs (hourly history cleanup) |
 | `src/db/` | SQLite (`better-sqlite3`, WAL) + Drizzle schema (`schema.ts`; `auth-schema.ts` is generated); migrations in `drizzle/` |
 | `src/wudict/routes.ts` | **The allowlist** of proxied wuDict routes and their query parameters |
 | `src/wudict/proxy.ts` | The proxy: Bearer token, header allowlists, NDJSON filtering, error mapping |
-| `src/wudict/catalog.ts` | Which wuDict dictionaries a request may use (all but the howto until Phase 5) |
+| `src/wudict/catalog.ts` | wuDict's dictionary listing, cached and revalidated by etag; the `DictAccess` interface |
 | `src/wudict/fake.ts` | Fake wuDict for unit tests; `contract.test.ts` runs against the real binary |
 | `src/static/pwa.ts` | Static PWA: precompressed files, cache headers, SPA fallback |
 

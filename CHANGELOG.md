@@ -58,6 +58,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   service worker with per-user caches for lookups, resources and the dictionary list, wiped on logout;
   update prompt; PNG and maskable icons. `GET /app-api/me` returns the session id. ADR 0006.
 
+- Phase 5: per-user features. The gateway keeps its `dictionaries` table in step with wuDict's listing
+  (PXDict ids survive wuDict id changes; new dictionaries found on disk get `BUILTIN_DICT_VISIBILITY`,
+  `global` by default) and per-user `user_dicts` (enabled flags, order, "new" notices). The proxy
+  searches each user's enabled dictionaries in their order and names them with PXDict's titles.
+  Search history is recorded by the proxy (repeats within a minute merged), can be filtered, deleted
+  and exported as CSV/JSON, and is trimmed hourly by each user's retention. Favorites (with notes,
+  export) and per-user settings (history, retention, default search mode, language, theme, text size)
+  are under `/app-api/me/*`, with `settings` and `newDicts` in `GET /app-api/me`. The PWA adds History,
+  Saved words and Dictionaries screens (toggle, drag-and-drop and arrow ordering), a ☆ button per
+  headword, recent searches in the empty search box, a new-dictionary notice, and preferences saved to
+  the account; article frames follow the text size. HTTP isolation tests between users. ADR 0007.
+
 ### Changed
 - Reference wuDict version is v3.7.11 (v3.7.12 is only a pre-release).
 - The first Go gateway skeleton was replaced by TypeScript; Cloudflare Access is no longer part of the

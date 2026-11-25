@@ -25,6 +25,14 @@ const dictFields = new Set([
 
 const genericError = "dictionary unavailable";
 
+/** PXDict's view of one wuDict dictionary (UsableDict in catalog.ts). */
+export interface DictLabel {
+  dictId: string;
+  title: string;
+  enabled: boolean;
+  trusted: boolean;
+}
+
 type Json = Record<string, unknown>;
 
 const isObject = (v: unknown): v is Json => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -43,11 +51,12 @@ export function sanitizeDict(dict: Json): Json {
 }
 
 /**
- * Maps one /api/dicts line: rows outside `allowed` and builtins are dropped, rows are sanitised and get
- * PXDict's `trustedRender` flag, `begin.total` and `end.etag` are removed (both describe wuDict's whole
- * library, not this user's view). Unknown line types are dropped.
+ * Maps one /api/dicts line: rows outside `allowed` and builtins are dropped, rows are sanitised, named
+ * with PXDict's title and get PXDict's `dictId`, `enabled` and `trustedRender`; `begin.total` and
+ * `end.etag` are removed (both describe wuDict's whole library, not this user's view). Unknown line
+ * types are dropped.
  */
-export function mapDictsLine(line: unknown, allowed: ReadonlySet<string>, trusted: ReadonlySet<string>): unknown {
+export function mapDictsLine(line: unknown, allowed: ReadonlyMap<string, DictLabel>): unknown {
   if (!isObject(line)) return undefined;
   switch (line.t) {
     case "begin":
@@ -56,16 +65,18 @@ export function mapDictsLine(line: unknown, allowed: ReadonlySet<string>, truste
       return { t: "end" };
     case "dict": {
       const dict = line.dict;
-      if (!isObject(dict) || isBuiltinDict(dict) || typeof dict.id !== "string" || !allowed.has(dict.id)) {
-        return undefined;
-      }
-      return { t: "dict", dict: { ...sanitizeDict(dict), trustedRender: trusted.has(dict.id) } };
+      const label = isObject(dict) && typeof dict.id === "string" ? allowed.get(dict.id) : undefined;
+      if (!isObject(dict) || isBuiltinDict(dict) || !label) return undefined;
+      return {
+        t: "dict",
+        dict: { ...sanitizeDict(dict), name: label.title, dictId: label.dictId, enabled: label.enabled, trustedRender: label.trusted },
+      };
     }
     case "busy": {
       const busy = Array.isArray(line.busy) ? line.busy : [];
       const kept = busy
         .filter((b): b is Json => isObject(b) && typeof b.id === "string" && allowed.has(b.id))
-        .map((b) => ({ id: b.id, name: b.name, phase: b.phase, done: b.done, total: b.total }));
+        .map((b) => ({ id: b.id, name: allowed.get(b.id as string)?.title ?? b.name, phase: b.phase, done: b.done, total: b.total }));
       return kept.length ? { t: "busy", busy: kept } : undefined;
     }
     default:
@@ -74,21 +85,30 @@ export function mapDictsLine(line: unknown, allowed: ReadonlySet<string>, truste
 }
 
 /**
- * Maps one /api/search line: error strings become generic and each article's `/res/<dict>/`
- * references go through `rewriteBody` (signed URLs). The gateway always sends an explicit `dict=`
- * list, so wuDict only answers for allowed dictionaries; a hit for any other one is dropped anyway.
- * `begin.slots` is passed unchanged because hits refer to slots by index.
+ * Maps one /api/search line: error strings become generic, names become PXDict's titles, and each
+ * article's `/res/<dict>/` references go through `rewriteBody` (signed URLs). The gateway always sends
+ * an explicit `dict=` list, so wuDict only answers for allowed dictionaries; a hit for any other one is
+ * dropped anyway. `begin.slots` keeps its length and order because hits refer to slots by index.
  */
 export function mapSearchLine(
   line: unknown,
-  allowed: ReadonlySet<string>,
+  allowed: ReadonlyMap<string, Pick<DictLabel, "title">>,
   rewriteBody: (body: string, dict: string) => string = (b) => b,
 ): unknown {
   if (!isObject(line)) return undefined;
+  if (line.t === "begin" && Array.isArray(line.slots)) {
+    const slots = line.slots.map((s: unknown) => {
+      if (!isObject(s) || typeof s.dict !== "string") return s;
+      const title = allowed.get(s.dict)?.title;
+      return title === undefined ? s : { ...s, name: title };
+    });
+    return { ...line, slots };
+  }
   if (line.t === "hit") {
     const dict = line.dict;
-    if (typeof dict !== "string" || !allowed.has(dict)) return undefined;
-    const out: Json = { ...line };
+    const label = typeof dict === "string" ? allowed.get(dict) : undefined;
+    if (typeof dict !== "string" || !label) return undefined;
+    const out: Json = { ...line, name: label.title };
     if (typeof out.error === "string" && out.error) out.error = genericError;
     if (Array.isArray(line.results)) {
       out.results = line.results.map((r: unknown) =>

@@ -2,12 +2,14 @@ import { render } from "preact";
 import { registerSW } from "virtual:pwa-register";
 import { App } from "./App";
 import { initialLocale, setLocale } from "./i18n";
+import { applyFont } from "./lib/font";
 import { applyTheme } from "./lib/theme";
 import { setUpdateWaiting } from "./lib/update";
 import "./styles.css";
 
 setLocale(initialLocale(navigator.languages));
 applyTheme();
+applyFont();
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
   applyTheme();
 });

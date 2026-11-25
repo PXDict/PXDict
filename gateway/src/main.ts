@@ -13,6 +13,7 @@ import { bootstrapAdmin, resetPasswordCli } from "./auth/bootstrap";
 import { createSmtpMailer } from "./auth/mailer";
 import { ConfigError, loadConfig, type Config } from "./config";
 import { databaseFile, openDatabase, type Db } from "./db/client";
+import { startJobs } from "./jobs";
 import { createLogger, type Logger } from "./log";
 import { WudictCatalog } from "./wudict/catalog";
 import { WudictClient } from "./wudict/client";
@@ -113,9 +114,11 @@ async function main(): Promise<void> {
     auth,
     emailEnabled: mailer !== undefined,
     wudict,
-    access: new WudictCatalog({ client: wudict }),
+    catalog: new WudictCatalog({ client: wudict }),
     ...(pwaFound ? { pwaDir: config.pwaDir } : {}),
   });
+
+  const stopJobs = startJobs({ db, logger, historyDefaultRetentionDays: config.historyDefaultRetentionDays });
 
   const server = serve(
     { fetch: app.fetch, port: config.listen.port, ...(config.listen.host ? { hostname: config.listen.host } : {}) },
@@ -139,6 +142,7 @@ async function main(): Promise<void> {
     if (stopping) return;
     stopping = true;
     logger.info("pxdict-gateway shutting down", { signal });
+    stopJobs();
     const exit = (code: number) => {
       db.$client.close();
       process.exit(code);

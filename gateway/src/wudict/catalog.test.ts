@@ -12,37 +12,55 @@ function setup() {
   return { fake, catalog, advance: (ms: number) => (now += ms) };
 }
 
+const ids = async (catalog: WudictCatalog) => (await catalog.snapshot()).rows.map((r) => r.id);
+
 describe("WudictCatalog", () => {
   it("lists every dictionary except the builtin howto, sorted", async () => {
     const { catalog } = setup();
-    expect(await catalog.allowedIds()).toEqual(["aaaaaaaaaaaa", "bbbbbbbbbbbb"]);
+    expect(await ids(catalog)).toEqual(["aaaaaaaaaaaa", "bbbbbbbbbbbb"]);
+  });
+
+  it("keeps the fields the registry matches on, and no other paths", async () => {
+    const { catalog } = setup();
+    expect((await catalog.snapshot()).rows[0]).toEqual({
+      id: "aaaaaaaaaaaa",
+      name: "Alpha",
+      format: "mdx",
+      libraryDir: "Alpha",
+      sourcePath: "/data/dictionaries/Alpha/Alpha.mdx",
+    });
   });
 
   it("reuses the list within the TTL and revalidates with the etag after it", async () => {
     const { fake, catalog, advance } = setup();
-    await catalog.allowedIds();
-    await catalog.allowedIds();
+    const first = await catalog.snapshot();
+    await catalog.snapshot();
     expect(fake.requests).toHaveLength(1);
 
     advance(1500);
-    expect(await catalog.allowedIds()).toEqual(["aaaaaaaaaaaa", "bbbbbbbbbbbb"]);
+    const second = await catalog.snapshot();
+    expect(second.rows.map((r) => r.id)).toEqual(["aaaaaaaaaaaa", "bbbbbbbbbbbb"]);
+    // 304: same listing, same version.
+    expect(second.version).toBe(first.version);
     expect(fake.requests).toHaveLength(2);
     expect(fake.lastRequest()?.headers.get("if-none-match")).toBe('"aaaaaaaaaaaa-bbbbbbbbbbbb"');
 
     fake.dicts = fake.dicts.slice(1);
     advance(1500);
-    expect(await catalog.allowedIds()).toEqual(["bbbbbbbbbbbb"]);
+    const third = await catalog.snapshot();
+    expect(third.rows.map((r) => r.id)).toEqual(["bbbbbbbbbbbb"]);
+    expect(third.version).not.toBe(first.version);
   });
 
   it("shares one refresh between concurrent callers", async () => {
     const { fake, catalog } = setup();
-    await Promise.all([catalog.allowedIds(), catalog.allowedIds(), catalog.allowedIds()]);
+    await Promise.all([catalog.snapshot(), catalog.snapshot(), catalog.snapshot()]);
     expect(fake.requests).toHaveLength(1);
   });
 
   it("fails with the upstream status", async () => {
     const { fake, catalog } = setup();
     fake.forceStatus = 500;
-    await expect(catalog.allowedIds()).rejects.toBeInstanceOf(WudictCatalogError);
+    await expect(catalog.snapshot()).rejects.toBeInstanceOf(WudictCatalogError);
   });
 });

@@ -115,7 +115,7 @@ export function harness(opts: HarnessOptions = {}) {
     auth,
     emailEnabled: mailer !== undefined,
     wudict,
-    access: catalog,
+    catalog,
     ...(opts.pwaDir ? { pwaDir: opts.pwaDir } : {}),
   });
   /** Requests the fake wuDict received for one path. */

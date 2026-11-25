@@ -13,7 +13,12 @@ import { originCheck } from "./http/origin";
 import { securityHeaders } from "./http/security";
 import type { Logger } from "./log";
 import { mountPwa } from "./static/pwa";
-import type { DictAccess } from "./wudict/catalog";
+import { DictRegistry } from "./dicts/registry";
+import { FavoritesStore } from "./favorites/favorites";
+import { HistoryStore } from "./history/history";
+import { createMeRoutes } from "./me/routes";
+import { SettingsStore } from "./settings/settings";
+import type { WudictCatalog } from "./wudict/catalog";
 import type { WudictClient } from "./wudict/client";
 import { createWudictRoutes } from "./wudict/proxy";
 import { ResourceSigner } from "./wudict/signed-url";
@@ -28,8 +33,8 @@ export interface AppOptions {
   /** Email-based sign-in methods are offered (a mailer is configured). */
   emailEnabled: boolean;
   wudict: WudictClient;
-  /** Which wuDict dictionaries requests may use. */
-  access: DictAccess;
+  /** wuDict's dictionary list, reconciled with the gateway's catalogue (dicts/registry.ts). */
+  catalog: Pick<WudictCatalog, "snapshot">;
   /** Built PWA; omitted in tests that do not need it. */
   pwaDir?: string;
 }
@@ -92,10 +97,38 @@ export function createApp(opts: AppOptions): Hono<AuthEnv> {
     return auth.handler(new Request(c.req.raw, { headers }));
   });
 
+  const registry = new DictRegistry({ db, catalog: opts.catalog, logger, builtinVisibility: config.builtinDictVisibility });
+  const settings = new SettingsStore(db, config.historyDefaultRetentionDays);
+  const history = new HistoryStore(db);
+  app.route(
+    "/",
+    createMeRoutes({
+      guards,
+      publicOrigin: config.publicUrl.origin,
+      logger,
+      registry,
+      settings,
+      history,
+      favorites: new FavoritesStore(db),
+    }),
+  );
+
   app.all("/app-api/*", (c) => jsonError(c, 404, "not_found", "no such endpoint"));
 
   const signer = new ResourceSigner(config.auth.secret);
-  app.route("/", createWudictRoutes({ client: wudict, access: opts.access, logger, guard: guards.requireUser, signer }));
+  app.route(
+    "/",
+    createWudictRoutes({
+      client: wudict,
+      access: registry,
+      logger,
+      guard: guards.requireUser,
+      signer,
+      onSearch: (userId, lookup) => {
+        if (settings.get(userId).historyEnabled) history.record(userId, lookup);
+      },
+    }),
+  );
 
   if (opts.pwaDir) mountPwa(app, opts.pwaDir, { publicOrigin: config.publicUrl.origin });
 

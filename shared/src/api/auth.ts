@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { NewDict, UserSettings } from "./me";
 
 export const RegistrationMode = z.enum(["closed", "invite", "open"]);
 export type RegistrationMode = z.infer<typeof RegistrationMode>;
@@ -67,6 +68,9 @@ export const Me = z.object({
     /** Set while an admin impersonates this user: the admin's user id. */
     impersonatedBy: z.string().nullable(),
   }),
+  settings: UserSettings,
+  /** Dictionaries added since the user last acknowledged them (POST /app-api/me/dicts/seen). */
+  newDicts: z.array(NewDict),
 });
 export type Me = z.infer<typeof Me>;
 

@@ -448,3 +448,166 @@ iframe.article {
   z-index: 20;
   max-width: calc(100vw - 2rem);
 }
+
+/* ----- Text size (per-user setting, lib/font.ts) ----- */
+:root[data-font="small"] {
+  font-size: 87.5%;
+}
+
+:root[data-font="large"] {
+  font-size: 112.5%;
+}
+
+:root[data-font="xlarge"] {
+  font-size: 125%;
+}
+
+/* ----- Header on narrow screens: the links wrap under the brand ----- */
+.topbar {
+  flex-wrap: wrap;
+}
+
+.topbar nav {
+  flex-wrap: wrap;
+  row-gap: 0.25rem;
+}
+
+.banner {
+  padding-top: 0.75rem;
+  padding-bottom: 0;
+}
+
+.badge-new {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+fieldset.plain {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+textarea {
+  font: inherit;
+  font-size: 1rem;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+  resize: vertical;
+}
+
+.toolbar {
+  display: flex;
+  margin-bottom: 0.75rem;
+}
+
+.toolbar input {
+  flex: 1;
+  min-width: 0;
+}
+
+.actions {
+  align-items: center;
+  margin-top: 1rem;
+}
+
+.link.danger {
+  color: var(--danger);
+}
+
+/* ----- Save button next to a headword ----- */
+.star {
+  margin-left: 0.5rem;
+  min-width: 32px;
+  min-height: 32px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.star.on {
+  color: #d4a017;
+}
+
+/* ----- History ----- */
+.day h3 {
+  margin: 1rem 0 0.25rem;
+  font-size: 0.9375rem;
+  color: var(--muted);
+}
+
+.day li a {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ----- Favorites ----- */
+.favorites {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.favorite {
+  padding-top: 0.75rem;
+}
+
+.favorite .row {
+  align-items: baseline;
+}
+
+.favorite .headword {
+  font-weight: 600;
+}
+
+.note {
+  margin: 0.25rem 0;
+  white-space: pre-wrap;
+}
+
+/* ----- Dictionary selection ----- */
+.dict-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.dict-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.dict-list li.dragging {
+  opacity: 0.5;
+}
+
+.grip {
+  color: var(--muted);
+  cursor: grab;
+  user-select: none;
+}
+
+.dict-toggle {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+}
+
+.order {
+  display: flex;
+  gap: 0.25rem;
+}
