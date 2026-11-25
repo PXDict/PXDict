@@ -185,18 +185,39 @@ because `typescript-eslint` does not support 7.x yet. A first Go skeleton was re
 **Goal:** one container running wuDict + gateway; the gateway serves the PWA and proxies wuDict safely.
 No users yet (Phase 3 locks everything behind a bootstrap admin).
 
-- [ ] `config.ts`: add `AUTH_TOKEN` (required, ≥ 32 chars, never logged), `PUBLIC_URL`, `COOKIE_SECURE`, `REGISTRATION=closed|invite|open`, `MAX_UPLOAD_BYTES` (accepts `500MB`, `2GiB`), `MAX_PENDING_PROPOSALS_PER_USER`, `HISTORY_DEFAULT_RETENTION_DAYS`, … with validation, defaults, and every problem reported at once.
-- [ ] `db/`: open SQLite with `better-sqlite3` (WAL, `busy_timeout`, `foreign_keys=ON`), Drizzle client, run `drizzle-kit` migrations at startup; first migration with the PXDict tables of section 1 that do not depend on users (`dictionaries`, `audit_log`).
-- [ ] `wudict/`: client with timeouts; streaming proxy (Hono + `fetch` with `duplex: "half"`, body piped without buffering) injecting Bearer, setting Host, passing SSE **and NDJSON** through line by line, stripping client `Cookie`/`Authorization`/`?k=` and upstream `Set-Cookie`; route allowlist in `routes.ts` (with per-route query allowlists); reserved wuDict paths answer 404 instead of the SPA fallback; NDJSON filter for `/api/dicts` (drop `wudict-howto`, strip filesystem fields); `fake.ts` for tests.
-- [ ] Serve the static PWA from `/srv/pwa`: SPA fallback, `no-cache` for `sw.js`/`index.html`/`manifest.webmanifest`, `immutable` for `/app-assets/*`, precompressed or on-the-fly gzip/br.
-- [ ] Default security headers: CSP, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`.
-- [ ] `Dockerfile`, 3 stages: Node build (`node:26-alpine`: `npm ci`, build PWA + gateway bundle, `npm ci --omit=dev -w @pxdict/gateway` for native modules) → wuDict **purego build from source** at `WUDICT_VERSION` from `WUDICT_REPO=wuweidict/wudict` ([ADR 0002](adr/0002-build-wudict-from-source.md)) → `node:26-alpine` runtime + `tini`, UID 1000, V8 heap capped (`--max-old-space-size`).
-- [ ] `docker/entrypoint.sh`: check required env, generate `AUTH_TOKEN` if unset, create `/data/*`, start wuDict (`AUTH=on`, `SERVER_IP=127.0.0.1`, `USE_CACHED=1`, `INDEX_WORKERS=1`, `HOME`/`XDG_*` under `/data/.wudict/`) and gateway, `wait -n` → if one dies, stop the container (logic of original §3.2).
-- [ ] `HEALTHCHECK` calls the gateway's `/healthz` (which checks wuDict).
-- [ ] `scripts/smoke-test.sh`: run the image, wait for healthy, check `/`, `/manifest.webmanifest`, `/healthz`, wuDict only on loopback, non-allowlisted routes return 404.
-- [ ] Contract tests (Vitest) against the real wuDict binary (separate CI job that builds/downloads it).
+- [x] `config.ts`: add `AUTH_TOKEN` (required, ≥ 32 chars, never logged), `PUBLIC_URL`, `COOKIE_SECURE`, `REGISTRATION=closed|invite|open`, `MAX_UPLOAD_BYTES` (accepts `500MB`, `2GiB`), `MAX_PENDING_PROPOSALS_PER_USER`, `HISTORY_DEFAULT_RETENTION_DAYS`, … with validation, defaults, and every problem reported at once.
+- [x] `db/`: open SQLite with `better-sqlite3` (WAL, `busy_timeout`, `foreign_keys=ON`), Drizzle client, run `drizzle-kit` migrations at startup; first migration with the PXDict tables of section 1 that do not depend on users (`dictionaries`, `audit_log`).
+- [x] `wudict/`: client with timeouts; streaming proxy (Hono + `fetch` with `duplex: "half"`, body piped without buffering) injecting Bearer, setting Host, passing SSE **and NDJSON** through line by line, stripping client `Cookie`/`Authorization`/`?k=` and upstream `Set-Cookie`; route allowlist in `routes.ts` (with per-route query allowlists); reserved wuDict paths answer 404 instead of the SPA fallback; NDJSON filter for `/api/dicts` (drop `wudict-howto`, strip filesystem fields); `fake.ts` for tests.
+- [x] Serve the static PWA from `/srv/pwa`: SPA fallback, `no-cache` for `sw.js`/`index.html`/`manifest.webmanifest`, `immutable` for `/app-assets/*`, precompressed or on-the-fly gzip/br.
+- [x] Default security headers: CSP, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`.
+- [x] `Dockerfile`, 3 stages: Node build (`node:26-alpine`: `npm ci`, build PWA + gateway bundle, `npm ci --omit=dev -w @pxdict/gateway` for native modules) → wuDict **purego build from source** at `WUDICT_VERSION` from `WUDICT_REPO=wuweidict/wudict` ([ADR 0002](adr/0002-build-wudict-from-source.md)) → `node:26-alpine` runtime + `tini`, UID 1000, V8 heap capped (`--max-old-space-size`).
+- [x] `docker/entrypoint.sh`: check required env, generate `AUTH_TOKEN` if unset, create `/data/*`, start wuDict (`AUTH=on`, `SERVER_IP=127.0.0.1`, `USE_CACHED=1`, `INDEX_WORKERS=1`, `HOME`/`XDG_*` under `/data/.wudict/`) and gateway, `wait -n` → if one dies, stop the container (logic of original §3.2).
+- [x] `HEALTHCHECK` calls the gateway's `/healthz` (which checks wuDict).
+- [x] `scripts/smoke-test.sh`: run the image, wait for healthy, check `/`, `/manifest.webmanifest`, `/healthz`, wuDict only on loopback, non-allowlisted routes return 404.
+- [x] Contract tests (Vitest) against the real wuDict binary (separate CI job that builds/downloads it).
 
 **Done when:** `docker run` of a local image serves the empty PWA, `/api/search` through the gateway returns results, `/setup` returns 404.
+
+**Result:** `scripts/smoke-test.sh pxdict:dev` checks exactly that (with a generated DSL dictionary),
+plus loopback-only wuDict and no token in the logs; CI builds the image and runs it, and runs the
+contract tests against a purego wuDict built at the pinned tag. Choices made on the way:
+
+- Until Phase 5 the allowed dictionaries are "everything wuDict lists except `wudict-howto`"
+  (`WudictCatalog`, cached for 5 s and revalidated with the `/api/dicts` etag). The proxy still always
+  sends an explicit `dict=` list. `begin.total` and `end.etag` are removed from `/api/dicts` (they
+  describe wuDict's whole library); DictInfo fields are allowlisted rather than stripped, and error
+  strings from wuDict become generic (they can name files).
+- `/api/search` refuses `format=clean` (wuDict would rewrite links to its loopback URL). `/res/…`
+  answers with `Cache-Control: private`, a `sandbox` CSP (a resource opened as a page gets an opaque
+  origin) and `Cross-Origin-Resource-Policy: cross-origin` (sandboxed iframes have an opaque origin).
+- The runtime image copies only the `better-sqlite3` package (its N-API prebuild for the target
+  architecture) instead of running `npm ci --omit=dev`: the bundle needs nothing else, and no compiler
+  is needed anywhere because better-sqlite3 ships musl prebuilds.
+- The PWA build writes `.br`/`.gz` next to compressible files; the gateway serves them precompressed
+  and does not compress on the fly. A minimal `manifest.webmanifest` + SVG icon exist until
+  `vite-plugin-pwa` (Phase 4).
+- The entrypoint generates `AUTH_TOKEN` per start (nothing outside the container needs it) and
+  redacts it from wuDict's output, whose startup banner prints its access key.
 
 ---
 

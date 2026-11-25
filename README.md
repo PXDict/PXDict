@@ -47,13 +47,19 @@ See [`AGENTS.md`](AGENTS.md) for the architecture rules and [`docs/PLAN.md`](doc
 
 ## Quick start
 
-> Not usable yet — Phase 1 (skeleton) of the [plan](docs/PLAN.md) is done.
+> Not usable yet — Phase 2 (gateway foundation, runnable image) of the [plan](docs/PLAN.md) is done;
+> there are no accounts until Phase 3, so do not expose an instance publicly.
 
 ```bash
 # development: Node.js 26 LTS (see .nvmrc)
 npm ci
 scripts/dev.sh                       # http://127.0.0.1:5173
 npm run typecheck && npm run lint && npm test
+
+# local image (one tag for every checkout, see AGENTS.md §4)
+docker build -t pxdict:dev .
+scripts/smoke-test.sh pxdict:dev
+docker run --rm -p 8080:8080 -v pxdict-data:/data pxdict:dev   # http://localhost:8080
 
 # self-hosting (Phase 9)
 cp deploy/.env.example deploy/.env   # fill in values

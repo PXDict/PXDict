@@ -235,6 +235,19 @@ gateway's contract tests against the real binary, are the main guard rails.
 
 ## 8. Working with the plan
 
+**Start every new feature from the latest `main`, on its own branch.** Before writing any code:
+
+1. Make sure the working tree is clean (commit or set aside unrelated work first).
+2. Fetch the latest `main`: `git fetch origin main`.
+3. Create a new branch from it, named after the work you are about to do, using the Conventional
+   Commits type as a prefix: `git switch -c <type>/<short-topic> origin/main`
+   (e.g. `feat/phase-3-auth`, `fix/proxy-host-header`, `docs/operations-runbook`).
+
+Never start a new feature on top of another feature branch or on a stale `main`, and never commit
+directly to `main`. If `main` moves while you work, rebase onto (or merge) `origin/main` before
+opening the PR. (`origin/main` is used instead of a local `main` because `main` may be checked out in
+another worktree.)
+
 - Follow the phase order in `docs/PLAN.md`. Keep each PR within one phase.
 - When an item is done, tick `[x]` in `docs/PLAN.md` in the same PR.
 - Any deviation from this file or the plan → write a short ADR in `docs/adr/` and update this file.
