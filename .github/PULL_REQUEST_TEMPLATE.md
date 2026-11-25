@@ -9,7 +9,7 @@
 ## Checklist
 
 - [ ] Stays within one phase of `docs/PLAN.md`; matching items ticked
-- [ ] Tests and linters pass for the changed parts (`go test`, `go vet`, `npm run typecheck`, `npm run lint`)
+- [ ] Tests and linters pass for the changed parts (`npm run typecheck`, `npm run lint`, `npm test`)
 - [ ] Security invariants in `AGENTS.md` §6 still hold
 - [ ] No assumed wuDict behaviour without an `ASSUMPTION(wudict)` marker and a note in `docs/wudict-notes.md`
 - [ ] `CHANGELOG.md` updated (if user-visible)

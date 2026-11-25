@@ -6,7 +6,7 @@
 # Open http://127.0.0.1:5173 (Vite). Vite forwards /app-api, /api, /res, /r and /healthz to the gateway.
 # Ctrl-C stops everything; if one process exits, the others are stopped too.
 #
-# Requirements: Go (version in gateway/go.mod), Node.js 22+, curl.
+# Requirements: Node.js 26 LTS (see .nvmrc), npm, curl. Go only for WUDICT_BUILD=source.
 #
 # Environment (all optional):
 #   WUDICT_VERSION   wuDict tag (default: contents of ./WUDICT_VERSION)
@@ -14,6 +14,7 @@
 #   WUDICT_BIN       use this wuDict binary instead of downloading one
 #   WUDICT_BUILD     "release" (default): download the official -cgo release binary (fine on glibc
 #                    Linux and macOS); "source": build the purego binary from source, as the image does
+#                    (needs Go and git)
 #   DEV_DATA_DIR     data directory with the /data layout (default .cache/dev-data)
 #   GATEWAY_PORT     gateway port (default 8080)
 #   WUDICT_PORT      wuDict port (default 6888)
@@ -34,7 +35,7 @@ wudict_port="${WUDICT_PORT:-6888}"
 log() { printf '\033[1;34m[dev]\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31m[dev]\033[0m %s\n' "$*" >&2; exit 1; }
 
-for cmd in go node npm curl; do
+for cmd in node npm curl; do
   command -v "$cmd" >/dev/null || die "$cmd is required (see the header of scripts/dev.sh)"
 done
 
@@ -78,6 +79,7 @@ wudict_bin() {
       ;;
     source)
       # Same build as the image (docs/adr/0002-build-wudict-from-source.md).
+      command -v go >/dev/null || die "WUDICT_BUILD=source needs Go (version in wuDict's go.mod)"
       local src="$dir/src"
       rm -rf "$src"
       log "building wuDict $version from source (purego)"
@@ -95,16 +97,12 @@ wudict_bin() {
 wudict="$(wudict_bin)"
 log "wuDict: $wudict"
 
-# --- gateway binary ------------------------------------------------------------------------------
-gateway="$repo_root/.cache/bin/pxdict-gateway"
-log "building pxdict-gateway"
-(cd gateway && CGO_ENABLED=0 go build -o "$gateway" ./cmd/pxdict-gateway)
-
-# --- PWA dependencies ----------------------------------------------------------------------------
-if [[ ! -d pwa/node_modules ]]; then
-  log "installing PWA dependencies"
-  (cd pwa && npm ci)
+# --- workspace dependencies (shared/, gateway/, pwa/) --------------------------------------------
+if [[ ! -d node_modules || package-lock.json -nt node_modules/.package-lock.json ]]; then
+  log "installing dependencies"
+  npm ci
 fi
+bin="$repo_root/node_modules/.bin"
 
 # --- data directory (same layout as /data in the image) ------------------------------------------
 mkdir -p "$data"/{dictionaries,db,gateway,proposals,tmp} "$data"/.wudict/{config,data,state,home}
@@ -146,13 +144,16 @@ trap 'exit 130' INT TERM
 pids+=($!)
 log "wuDict on 127.0.0.1:$wudict_port (data: $data)"
 
+# Gateway from source, restarted on change (tsx watch).
 (
+  cd gateway
   export LISTEN_ADDR="127.0.0.1:$gateway_port" \
     DATA_DIR="$data" \
     WUDICT_URL="http://127.0.0.1:$wudict_port" \
     AUTH_TOKEN="$auth_token" \
-    PWA_DIR="$repo_root/pwa/dist"
-  exec "$gateway"
+    PWA_DIR="$repo_root/pwa/dist" \
+    LOG_LEVEL="${LOG_LEVEL:-debug}"
+  exec "$bin/tsx" watch src/main.ts
 ) &
 pids+=($!)
 log "gateway on 127.0.0.1:$gateway_port"
@@ -160,7 +161,7 @@ log "gateway on 127.0.0.1:$gateway_port"
 (
   cd pwa
   export PXDICT_GATEWAY_URL="http://127.0.0.1:$gateway_port"
-  exec node_modules/.bin/vite
+  exec "$bin/vite"
 ) &
 pids+=($!)
 log "PWA on http://127.0.0.1:5173"

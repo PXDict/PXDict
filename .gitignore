@@ -24,15 +24,10 @@ build/
 coverage/
 *.log
 
-# Go
-/gateway/bin/
-*.test
-*.out
-
 # Node
 node_modules/
 .vite/
-pwa/openapi.yaml
+*.tsbuildinfo
 
 # Editors / OS
 .idea/
