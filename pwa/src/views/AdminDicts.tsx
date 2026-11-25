@@ -5,7 +5,8 @@ import { getAdminDicts, reindexDict, rescanDicts, updateAdminDict, type AdminDic
 import { t } from "../i18n";
 import { errorMessage } from "../lib/errors";
 import { navigate } from "../lib/router";
-import { AdminNav, indexText } from "./AdminProposals";
+import { AdminNav } from "./AdminNav";
+import { indexText } from "./AdminProposals";
 import { Notice } from "./Field";
 
 export function AdminDicts() {

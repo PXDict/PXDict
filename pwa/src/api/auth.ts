@@ -2,7 +2,7 @@
 // ApiError. Re-exported by app.ts, the adapter UI code imports; nothing else talks to Better Auth.
 import { passkeyClient } from "@better-auth/passkey/client";
 import { createAuthClient } from "better-auth/client";
-import { emailOTPClient, magicLinkClient, twoFactorClient, usernameClient } from "better-auth/client/plugins";
+import { adminClient, emailOTPClient, magicLinkClient, twoFactorClient, usernameClient } from "better-auth/client/plugins";
 import { ApiError, notifyUnauthorized } from "./http";
 
 export const authBasePath = "/app-api/auth";
@@ -11,7 +11,7 @@ const client = createAuthClient({
   baseURL: location.origin,
   basePath: authBasePath,
   // Every sign-in method the gateway may enable; GET /app-api/auth/methods says which are on.
-  plugins: [usernameClient(), twoFactorClient(), passkeyClient(), magicLinkClient(), emailOTPClient()],
+  plugins: [usernameClient(), twoFactorClient(), passkeyClient(), magicLinkClient(), emailOTPClient(), adminClient()],
   // Looks fetch up on every call instead of keeping the one present at load (tests stub it).
   fetchOptions: { credentials: "same-origin", customFetchImpl: (input, init) => fetch(input, init) },
 });
@@ -234,4 +234,79 @@ export async function revokeSession(token: string): Promise<void> {
 
 export async function revokeOtherSessions(): Promise<void> {
   await unwrap(client.revokeOtherSessions(), true);
+}
+
+// Admins: user management (Better Auth's admin plugin; the gateway adds its admin check in front)
+
+export interface AdminUser {
+  id: string;
+  name: string;
+  email: string;
+  username: string | null;
+  role: "user" | "admin";
+  banned: boolean;
+  banReason: string | null;
+  emailVerified: boolean;
+  createdAt: string;
+}
+
+export interface AdminUserPage {
+  users: AdminUser[];
+  total: number;
+}
+
+const toIso = (v: unknown) => (v instanceof Date ? v.toISOString() : typeof v === "string" ? v : "");
+
+/** Users, newest first, optionally those whose email contains `search`. */
+export async function listUsers(o: { search?: string; limit: number; offset: number }): Promise<AdminUserPage> {
+  const data = await unwrap(
+    client.admin.listUsers({
+      query: {
+        limit: o.limit,
+        offset: o.offset,
+        sortBy: "createdAt",
+        sortDirection: "desc",
+        ...(o.search ? { searchValue: o.search, searchField: "email" as const, searchOperator: "contains" as const } : {}),
+      },
+    }),
+    true,
+  );
+  const users = data.users.map((u): AdminUser => {
+    const x = u as typeof u & { username?: string | null; banReason?: string | null };
+    return {
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      username: x.username ?? null,
+      role: u.role === "admin" ? "admin" : "user",
+      banned: u.banned === true,
+      banReason: x.banReason ?? null,
+      emailVerified: u.emailVerified,
+      createdAt: toIso(u.createdAt),
+    };
+  });
+  return { users, total: "total" in data ? data.total : users.length };
+}
+
+export async function setUserRole(userId: string, role: "user" | "admin"): Promise<void> {
+  await unwrap(client.admin.setRole({ userId, role }), true);
+}
+
+/** Suspends an account (and ends its sessions). */
+export async function banUser(userId: string, reason?: string): Promise<void> {
+  await unwrap(client.admin.banUser({ userId, ...(reason ? { banReason: reason } : {}) }), true);
+}
+
+export async function unbanUser(userId: string): Promise<void> {
+  await unwrap(client.admin.unbanUser({ userId }), true);
+}
+
+/** Signs the user out everywhere. */
+export async function revokeUserSessions(userId: string): Promise<void> {
+  await unwrap(client.admin.revokeUserSessions({ userId }), true);
+}
+
+/** Deletes the account and, with it, the user's own data. */
+export async function removeUser(userId: string): Promise<void> {
+  await unwrap(client.admin.removeUser({ userId }), true);
 }

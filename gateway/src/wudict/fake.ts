@@ -16,6 +16,8 @@ export interface FakeDict {
   sourcePath?: string;
   /** False until /api/ingest ran (no dbPath/folder in /api/dicts); default true. */
   indexed?: boolean;
+  /** The originals were deleted (DELETE /api/library?prepared=0): listed from its index only. */
+  sourceDeleted?: boolean;
 }
 
 export interface FakeWudictOptions {
@@ -137,8 +139,36 @@ export class FakeWudict {
       return c.body(events.join(""), 200, { "Content-Type": "text/event-stream" });
     });
 
+    // DELETE /api/library?dict=<id>[&prepared=0] (docs/wudict-notes.md Q9, Q11): removes the library
+    // folder and the main + .mdd files; with prepared=0 only those files, and the id changes.
+    app.delete("/api/library", (c) => {
+      if (!authorized(c.req.header("Authorization"))) return c.json({ error: "access key required" }, 401);
+      const d = this.dicts.find((x) => x.id === c.req.query("dict"));
+      if (!d) return c.json({ error: "unknown dictionary" }, 404);
+      const keepIndex = c.req.query("prepared") === "0";
+      if (keepIndex && d.indexed === false) return c.json({ error: `pack media for ${d.name} first` }, 409);
+      const sources: string[] = [];
+      if (d.sourcePath && !d.sourceDeleted) {
+        const dir = path.dirname(d.sourcePath);
+        const stem = path.basename(d.sourcePath).replace(/\.[^.]+$/, "");
+        sources.push(d.sourcePath);
+        if (fs.existsSync(dir)) {
+          for (const n of fs.readdirSync(dir)) if (n.startsWith(`${stem}.`) && n.toLowerCase().endsWith(".mdd")) sources.push(path.join(dir, n));
+        }
+        for (const f of sources) fs.rmSync(f, { force: true });
+      }
+      if (keepIndex) {
+        d.sourceDeleted = true;
+        d.id = createHash("sha256").update(`/data/db/${d.name}/text.db`).digest("hex").slice(0, 12);
+      } else {
+        this.dicts = this.dicts.filter((x) => x !== d);
+        if (this.#dbDir) fs.rmSync(path.join(this.#dbDir, d.name), { recursive: true, force: true });
+      }
+      return c.json({ name: d.name, sources, freed: 1, gone: true });
+    });
+
     app.get("/api/dicts", (c) => {
-      const etag = `"${this.dicts.map((d) => `${d.id}${d.indexed === false ? "u" : ""}`).join("-")}"`;
+      const etag = `"${this.dicts.map((d) => `${d.id}${d.indexed === false ? "u" : ""}${d.sourceDeleted ? "s" : ""}`).join("-")}"`;
       if (c.req.header("If-None-Match") === etag) return c.body(null, 304);
       return ndjson([
         { t: "begin", total: this.dicts.length + 1, groupsProblems: 0 },
@@ -148,8 +178,12 @@ export class FakeWudict {
             id: d.id,
             name: d.name,
             format: "mdx",
-            path: d.sourcePath ?? `/data/dictionaries/${d.name}/${d.name}.mdx`,
-            source: d.sourcePath ?? `/data/dictionaries/${d.name}/${d.name}.mdx`,
+            ...(d.sourceDeleted
+              ? { path: `/data/db/${d.name}/text.db` }
+              : {
+                  path: d.sourcePath ?? `/data/dictionaries/${d.name}/${d.name}.mdx`,
+                  source: d.sourcePath ?? `/data/dictionaries/${d.name}/${d.name}.mdx`,
+                }),
             ...(d.indexed === false ? {} : { dbPath: `/data/db/${d.name}/text.db`, folder: `/data/db/${d.name}` }),
             entries: Object.keys(d.entries).length,
             caps: { Exact: true, Prefix: true },

@@ -14,8 +14,8 @@ import {
 } from "../api/app";
 import { getLocale, t, type MessageKey } from "../i18n";
 import { errorMessage } from "../lib/errors";
-import { navigate } from "../lib/router";
 import { formatBytes, suggestDictId } from "../lib/upload";
+import { AdminNav } from "./AdminNav";
 import { Field, Notice } from "./Field";
 
 const filters: (ProposalStatus | "all")[] = ["pending", "approved", "rejected", "uploading", "withdrawn", "all"];
@@ -66,27 +66,6 @@ function IndexProgress({ dictId }: { dictId: string }) {
   }, [dictId]);
   if (!status) return null;
   return <p role="status">{indexText(status)}</p>;
-}
-
-export function AdminNav({ current }: { current: "proposals" | "dicts" }) {
-  const link = (path: string, key: MessageKey, on: boolean) => (
-    <a
-      href={path}
-      aria-current={on ? "page" : undefined}
-      onClick={(e) => {
-        e.preventDefault();
-        navigate(path);
-      }}
-    >
-      {t(key)}
-    </a>
-  );
-  return (
-    <nav class="subnav" aria-label={t("admin.nav")}>
-      {link("/admin/proposals", "admin.proposals", current === "proposals")}
-      {link("/admin/dicts", "admin.dicts", current === "dicts")}
-    </nav>
-  );
 }
 
 function Review({ p, onChanged }: { p: AdminProposal; onChanged: (p: AdminProposal) => void }) {

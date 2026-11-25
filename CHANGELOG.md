@@ -82,6 +82,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   `uuid` from `info.txt`. Proposers are notified of decisions in the PWA. New PWA screens: Propose,
   Admin → Proposals and Dictionaries. Contract test of the approval flow against the real wuDict.
 
+- Phase 7: storage administration (`/app-api/admin/storage`, ADR 0009): disk use per area and per
+  dictionary (original files, index, users who enabled it); deletion of MDX original files (index kept),
+  whole dictionaries, leftover proposal files, stale temporary files, orphaned indexes and auxiliary
+  files, always as a dry-run plan (every path and size, warnings, valid ten minutes) followed by an
+  execution that re-checks every file and records `storage.delete` with `bytes_freed` in `audit_log`;
+  read-only `DICT_DIR` detection; `GET /app-api/admin/audit`; hourly removal of stale `tmp/` entries and
+  a weekly `VACUUM` when idle; the PWA's admin area gains Users (roles, suspend, sign out everywhere,
+  delete, invite codes), Storage and Audit log pages.
+
 ### Changed
 - Reference wuDict version is v3.7.11 (v3.7.12 is only a pre-release).
 - The first Go gateway skeleton was replaced by TypeScript; Cloudflare Access is no longer part of the

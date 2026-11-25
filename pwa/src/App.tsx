@@ -16,8 +16,11 @@ import { readLastUser, setActiveUser, wipeUserData, type LastUser } from "./lib/
 import { loginUrl, navigate, safeNext, useLocation } from "./lib/router";
 import { applySettings } from "./lib/settings";
 import { Account } from "./views/Account";
+import { AdminAudit } from "./views/AdminAudit";
 import { AdminDicts } from "./views/AdminDicts";
 import { AdminProposals } from "./views/AdminProposals";
+import { AdminStorage } from "./views/AdminStorage";
+import { AdminUsers } from "./views/AdminUsers";
 import { Dictionaries } from "./views/Dictionaries";
 import { Favorites } from "./views/Favorites";
 import { Notice } from "./views/Field";
@@ -171,8 +174,11 @@ export function App() {
   else if (loc.path === "/favorites") page = me ? <Favorites /> : offline;
   else if (loc.path === "/dictionaries") page = me ? <Dictionaries onSeen={onDictsSeen} /> : offline;
   else if (loc.path === "/proposals") page = me ? <Proposals onSeen={onProposalsSeen} /> : offline;
-  else if (loc.path === "/admin/proposals" && me?.user.role === "admin") page = <AdminProposals />;
+  else if ((loc.path === "/admin" || loc.path === "/admin/proposals") && me?.user.role === "admin") page = <AdminProposals />;
   else if (loc.path === "/admin/dicts" && me?.user.role === "admin") page = <AdminDicts />;
+  else if (loc.path === "/admin/users" && me?.user.role === "admin") page = <AdminUsers selfId={me.user.id} />;
+  else if (loc.path === "/admin/storage" && me?.user.role === "admin") page = <AdminStorage />;
+  else if (loc.path === "/admin/audit" && me?.user.role === "admin") page = <AdminAudit />;
   else if (publicPaths.has(loc.path)) page = null;
   else {
     page = (
@@ -217,7 +223,7 @@ export function App() {
           {isAdmin && (
             <a
               href="/admin/proposals"
-              aria-current={loc.path.startsWith("/admin/") ? "page" : undefined}
+              aria-current={loc.path === "/admin" || loc.path.startsWith("/admin/") ? "page" : undefined}
               onClick={(e) => {
                 e.preventDefault();
                 navigate("/admin/proposals");

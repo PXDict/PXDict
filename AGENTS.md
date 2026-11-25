@@ -133,7 +133,7 @@ PXDict/
 │   │   ├── history/ favorites/ settings/   # per-user stores (Phase 5)
 │   │   ├── audit/              # audit_log writer
 │   │   ├── proposals/          # uploads, checks (zip limits, headers), review (Phase 6, ADR 0008)
-│   │   └── storage/            # safe-path.ts (safeJoin), disk usage; storage admin later (Phase 7)
+│   │   └── storage/            # safe-path.ts (safeJoin), admin.ts: usage, dry-run plans, deletion (Phase 7, ADR 0009)
 │   └── drizzle/                # generated SQL migrations (append-only)
 ├── pwa/                        # @pxdict/pwa: Vite + Preact + TypeScript
 │   └── src/

@@ -6,3 +6,4 @@ export * from "./api/health";
 export * from "./api/me";
 export * from "./api/admin-dicts";
 export * from "./api/proposals";
+export * from "./api/admin-storage";

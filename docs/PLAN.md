@@ -114,7 +114,7 @@ audit_log(id, actor_user_id, action, target_type, target_id, details_json, bytes
 | Admin: proposals | `GET /admin/proposals`, `GET /admin/proposals/{id}`, `POST .../{id}/approve {scope, dict_id, trusted_render}`, `POST .../{id}/reject {note}` | admin |
 | Admin: dictionaries | `GET /admin/dicts`, `PATCH /admin/dicts/{id}` (visibility, owner, trusted_render, title), `POST /admin/dicts/rescan`, `GET /admin/dicts/{id}/index-status`, `POST /admin/dicts/{id}/index` (retry) | admin |
 | Admin: storage | `GET /admin/storage` (overview), `POST /admin/storage/plan` (dry-run → items + bytes + `plan_id`), `POST /admin/storage/execute {plan_id}` | admin |
-| Admin: misc | `GET /admin/audit`, `GET /admin/system` (wuDict version, RAM, disk) | admin |
+| Admin: misc | `GET /admin/audit?cursor=&limit=&action=` (Phase 7), `GET /admin/system` (wuDict version, RAM, disk; not built yet) | admin |
 | System | `GET /healthz` (gateway + wuDict) | public |
 
 Proxying to wuDict (after the session check):
@@ -339,19 +339,25 @@ and OIDC are covered end to end by the gateway tests, passkeys only up to the We
 
 **Goal:** admins see where disk space goes and safely delete what is not needed.
 
-- [ ] `GET /admin/storage`: free space on the volume; usage per area (`dictionaries`, `db`, `proposals`, `tmp`, `gateway`); per dictionary: original files, index, number of users with it enabled.
-- [ ] Deletable categories:
+- [x] `GET /admin/storage`: free space on the volume; usage per area (`dictionaries`, `db`, `proposals`, `tmp`, `gateway`); per dictionary: original files, index, number of users with it enabled.
+- [x] Deletable categories:
   - **Original files of an indexed dictionary** — Phase 0 confirmed for **MDX/MDD only**, and only once media is packed (`media.db`) and wuDict runs with `USE_CACHED=1`: `DELETE /api/library?dict=<id>&prepared=0`. Sidecar files (CSS/JS beside the MDX) are left by wuDict → the gateway removes them. The wuDict id **changes** afterwards → rescan and re-match by `wudict_uuid`. Other formats: hidden with an explanation. Warning: without originals, the dictionary cannot be re-indexed when wuDict bumps its reader version.
   - **Whole dictionary (originals + index)** — removed from the system; warns how many users use it.
   - **Rejected / withdrawn proposals** with leftover files.
   - **Stale uploads** in `/data/tmp` older than 24 hours.
   - **Orphaned indexes** in `/data/db` with no matching dictionary.
   - **Unused auxiliary files** (e.g. duplicate `.mdd`, junk in dictionary folders) — listed only; the admin picks files individually.
-- [ ] Two-step flow: `POST /admin/storage/plan` (dry-run returning paths, bytes, warnings, `plan_id` valid for 10 minutes) → `POST /admin/storage/execute {plan_id}`; execution re-checks every file (skips anything that changed) and writes `audit_log` with `bytes_freed`.
-- [ ] Deleting a dictionary calls `DELETE /api/library?dict=<id>` first (removes `db/<name>/` + main/companion files; no dry run there, so the gateway builds its own), then cleans the remaining files in `/data/dictionaries/<dict_id>/`; updates `dictionaries` and `user_dicts`.
-- [ ] Detect a read-only `DICT_DIR` mount → disable original-file deletion and say why.
-- [ ] Gateway background jobs: clean `tmp`, expire history, weekly SQLite `VACUUM` (when idle).
-- [ ] Admin UI in the PWA (`/admin`, visible to admins only): Users, Proposals, Dictionaries, Storage, Audit log.
+- [x] Two-step flow: `POST /admin/storage/plan` (dry-run returning paths, bytes, warnings, `plan_id` valid for 10 minutes) → `POST /admin/storage/execute {plan_id}`; execution re-checks every file (skips anything that changed) and writes `audit_log` with `bytes_freed`.
+- [x] Deleting a dictionary calls `DELETE /api/library?dict=<id>` first (removes `db/<name>/` + main/companion files; no dry run there, so the gateway builds its own), then cleans the remaining files in `/data/dictionaries/<dict_id>/`; updates `dictionaries` and `user_dicts`.
+- [x] Detect a read-only `DICT_DIR` mount → disable original-file deletion and say why.
+- [x] Gateway background jobs: clean `tmp`, expire history, weekly SQLite `VACUUM` (when idle).
+- [x] Admin UI in the PWA (`/admin`, visible to admins only): Users, Proposals, Dictionaries, Storage, Audit log.
+
+Implementation notes ([ADR 0009](adr/0009-storage-administration.md)): the gateway attributes files to
+dictionaries itself (wuDict reports only the main file); "original files" are the MDX, its `.mdd` files
+and the CSS/JS beside it; plans are kept in memory, bound to the admin and single use; the weekly
+`VACUUM` remembers its last run as a `system.vacuum` audit entry; `GET /app-api/admin/audit` pages the
+audit log. Whole-dictionary deletion is checked against the real wuDict binary in `contract.test.ts`.
 
 **Done when:** an admin deletes a 500 MB dictionary via the UI, free disk increases accordingly, the audit log is correct; a dry-run never deletes anything.
 
