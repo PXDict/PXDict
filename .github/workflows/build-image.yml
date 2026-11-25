@@ -64,8 +64,8 @@ jobs:
       push: ${{ steps.v.outputs.push }}
       build: ${{ steps.v.outputs.build }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -144,8 +144,8 @@ jobs:
       WUDICT: ${{ needs.resolve.outputs.wudict }}
       PXDICT: ${{ needs.resolve.outputs.pxdict }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -171,10 +171,10 @@ jobs:
           npm test -w @pxdict/gateway -- contract
 
       # 3) Smoke test the amd64 image.
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
       - name: Build amd64 for the smoke test
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
@@ -190,7 +190,7 @@ jobs:
         run: scripts/smoke-test.sh pxdict:test
 
       # 4) Publish, only after every check above passed.
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         if: needs.resolve.outputs.push == 'true'
         with:
           registry: ghcr.io
@@ -198,7 +198,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push multi-arch
         if: needs.resolve.outputs.push == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64

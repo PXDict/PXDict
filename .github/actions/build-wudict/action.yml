@@ -25,7 +25,7 @@ runs:
         rm -rf .cache/wudict-src
         git -c advice.detachedHead=false clone --quiet --depth 1 \
           --branch "$VERSION" "https://github.com/${REPO}.git" .cache/wudict-src
-    - uses: actions/setup-go@v6
+    - uses: actions/setup-go@v7
       with:
         go-version-file: .cache/wudict-src/go.mod
         cache-dependency-path: .cache/wudict-src/go.sum
