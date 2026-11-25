@@ -1,0 +1,219 @@
+# Build, test and publish the PXDict image to GHCR (docs/PLAN.md Phase 8, original design §7.2).
+#
+#   schedule / push to main → newest stable wuDict tag (scripts/latest-wudict.sh)
+#                             → :latest, :wudict-<tag>, :wudict-<tag>-<sha>
+#   tag vX.Y.Z              → pinned wuDict tag (./WUDICT_VERSION) → :X.Y.Z, :X.Y
+#   workflow_dispatch       → chosen (or newest) wuDict tag; pushes only from main
+#
+# Nothing is pushed unless the API check (wuDict's openapi.yaml → types → tsc), the gateway's
+# contract tests against the real wuDict binary and the image smoke test all pass.
+name: Build image
+
+on:
+  schedule:
+    - cron: "17 20 * * *" # daily; a no-op when this commit was already built with the newest wuDict
+  workflow_dispatch:
+    inputs:
+      wudict_version:
+        description: "wuDict tag, e.g. v3.7.11 (empty = newest stable)"
+        required: false
+      force:
+        description: "Rebuild even if this image already exists"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+    paths:
+      - "shared/**"
+      - "gateway/**"
+      - "pwa/**"
+      - "docker/**"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.base.json"
+      - "WUDICT_VERSION"
+      - "scripts/smoke-test.sh"
+      - "scripts/latest-wudict.sh"
+      - ".github/actions/build-wudict/**"
+      - ".github/workflows/build-image.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  WUDICT_REPO: wuweidict/wudict
+
+jobs:
+  resolve:
+    name: Resolve versions and tags
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      wudict: ${{ steps.v.outputs.wudict }}
+      pxdict: ${{ steps.v.outputs.pxdict }}
+      tags: ${{ steps.v.outputs.tags }}
+      push: ${{ steps.v.outputs.push }}
+      build: ${{ steps.v.outputs.build }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: v
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          OWNER: ${{ github.repository_owner }}
+          INPUT_VERSION: ${{ inputs.wudict_version }}
+          INPUT_FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${OWNER,,}/pxdict"
+          newest="$(scripts/latest-wudict.sh || true)" # validated below where it is used
+
+          if [[ "$REF_TYPE" == tag ]]; then
+            # A release is reproducible: it uses the wuDict tag pinned in the tagged commit.
+            wudict="$(tr -d '[:space:]' < WUDICT_VERSION)"
+            pxdict="${REF_NAME#v}"
+            grep -Fq "## [${pxdict}]" CHANGELOG.md || {
+              echo "::error::CHANGELOG.md has no '## [${pxdict}]' section"
+              exit 1
+            }
+            tags="${image}:${pxdict},${image}:${pxdict%.*}"
+          else
+            wudict="${INPUT_VERSION:-$newest}"
+            pxdict="sha-${SHA:0:12}"
+            tags="${image}:wudict-${wudict},${image}:wudict-${wudict}-${SHA}"
+            # :latest only for the newest stable wuDict, so a manual build of an older tag never wins.
+            [[ "$wudict" == "$newest" ]] && tags="${image}:latest,${tags}"
+          fi
+          if ! [[ "$wudict" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::invalid wuDict tag: ${wudict}"
+            exit 1
+          fi
+
+          # Only main and release tags publish; other branches (manual runs) build and test only.
+          push=false
+          [[ "$REF" == refs/heads/main || "$REF_TYPE" == tag ]] && push=true
+
+          # The daily run skips commits already built with this wuDict tag.
+          build=true
+          if [[ "$EVENT" == schedule && "$INPUT_FORCE" != true ]] &&
+            docker buildx imagetools inspect "${image}:wudict-${wudict}-${SHA}" >/dev/null 2>&1; then
+            build=false
+          fi
+
+          {
+            echo "wudict=${wudict}"
+            echo "pxdict=${pxdict}"
+            echo "tags=${tags}"
+            echo "push=${push}"
+            echo "build=${build}"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Build image"
+            echo "- wuDict: \`${wudict}\` (newest stable: \`${newest}\`)"
+            echo "- PXDict: \`${pxdict}\`"
+            echo "- build: ${build}, push: ${push}"
+            echo "- tags: \`${tags//,/\`, \`}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Test and publish (wuDict ${{ needs.resolve.outputs.wudict }})
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      WUDICT: ${{ needs.resolve.outputs.wudict }}
+      PXDICT: ${{ needs.resolve.outputs.pxdict }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      # 1) API check: wuDict's API has no version prefix, so the typed client is the guard rail.
+      - name: Types from this wuDict's openapi.yaml still typecheck
+        run: |
+          WUDICT_VERSION="$WUDICT" npm run gen:api
+          npm run typecheck
+
+      # 2) Contract tests: the gateway against the real binary of this wuDict tag.
+      - uses: ./.github/actions/build-wudict
+        id: wudict
+        with:
+          version: ${{ env.WUDICT }}
+          repo: ${{ env.WUDICT_REPO }}
+      - name: Contract tests
+        env:
+          WUDICT_BIN: ${{ steps.wudict.outputs.bin }}
+        run: |
+          test -x "$WUDICT_BIN" # the tests skip themselves without a binary
+          npm test -w @pxdict/gateway -- contract
+
+      # 3) Smoke test the amd64 image.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build amd64 for the smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: pxdict:test
+          build-args: |
+            WUDICT_VERSION=${{ env.WUDICT }}
+            WUDICT_REPO=${{ env.WUDICT_REPO }}
+            PXDICT_VERSION=${{ env.PXDICT }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test
+        run: scripts/smoke-test.sh pxdict:test
+
+      # 4) Publish, only after every check above passed.
+      - uses: docker/login-action@v3
+        if: needs.resolve.outputs.push == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push multi-arch
+        if: needs.resolve.outputs.push == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            WUDICT_VERSION=${{ env.WUDICT }}
+            WUDICT_REPO=${{ env.WUDICT_REPO }}
+            PXDICT_VERSION=${{ env.PXDICT }}
+          tags: ${{ needs.resolve.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.PXDICT }}
+            org.opencontainers.image.licenses=GPL-3.0-or-later
+            io.github.wudict.version=${{ env.WUDICT }}
+            io.github.wudict.source=https://github.com/${{ env.WUDICT_REPO }}/tree/${{ env.WUDICT }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

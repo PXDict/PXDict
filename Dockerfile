@@ -7,14 +7,13 @@
 #   docker build --build-arg WUDICT_VERSION=v3.7.11 -t pxdict:dev .
 #
 # Stages: app (PWA + gateway bundle) → wudict (purego build, ADR 0002) → runtime.
-
-ARG NODE_IMAGE=node:26-alpine
-ARG GO_IMAGE=golang:1.26-alpine
+# Base images are written out in each FROM (no ARG) so Dependabot can update them; keep both
+# node:26-alpine lines on the same tag.
 
 ############################################################
 # 1) PWA + gateway bundle (platform independent)
 ############################################################
-FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS app
+FROM --platform=$BUILDPLATFORM node:26-alpine AS app
 WORKDIR /src
 COPY package.json package-lock.json ./
 COPY shared/package.json shared/
@@ -46,7 +45,7 @@ RUN set -eu; \
 ############################################################
 # 2) wuDict, built from the upstream tag (docs/adr/0002-build-wudict-from-source.md)
 ############################################################
-FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS wudict
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS wudict
 RUN apk add --no-cache git
 # Keep the default equal to ./WUDICT_VERSION (CI checks it).
 ARG WUDICT_VERSION=v3.7.11
@@ -65,7 +64,7 @@ RUN --mount=type=cache,target=/root/go/pkg/mod --mount=type=cache,target=/root/.
 ############################################################
 # 3) Runtime
 ############################################################
-FROM ${NODE_IMAGE}
+FROM node:26-alpine
 ARG WUDICT_VERSION=v3.7.11
 ARG WUDICT_REPO=wuweidict/wudict
 ARG PXDICT_VERSION=dev

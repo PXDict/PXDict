@@ -46,25 +46,18 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      - name: Fetch wuDict at the pinned tag
-        run: |
-          git -c advice.detachedHead=false clone --quiet --depth 1 \
-            --branch "$(tr -d '[:space:]' < WUDICT_VERSION)" https://github.com/wuweidict/wudict.git .cache/wudict-src
-      - uses: actions/setup-go@v6
+      - name: Read the pinned wuDict tag
+        id: pin
+        run: echo "version=$(tr -d '[:space:]' < WUDICT_VERSION)" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/build-wudict
+        id: wudict
         with:
-          go-version-file: .cache/wudict-src/go.mod
-          cache-dependency-path: .cache/wudict-src/go.sum
-      - name: Build wuDict (purego, as in the image)
-        working-directory: .cache/wudict-src
-        run: |
-          CGO_ENABLED=0 go build -buildvcs=false -trimpath -tags purego \
-            -ldflags "-s -w -X github.com/wuweidict/wudict/internal/cli.Version=$(tr -d '[:space:]' < ../../WUDICT_VERSION)" \
-            -o ../wudict .
+          version: ${{ steps.pin.outputs.version }}
       - run: npm ci
       - name: Contract tests
         run: npm test -w @pxdict/gateway -- contract
         env:
-          WUDICT_BIN: ${{ github.workspace }}/.cache/wudict
+          WUDICT_BIN: ${{ steps.wudict.outputs.bin }}
 
   image:
     name: Image build + smoke test
@@ -96,5 +89,11 @@ jobs:
           count="$(grep -c "^ARG WUDICT_VERSION=${want}\$" Dockerfile)"
           test "$count" -eq "$(grep -c '^ARG WUDICT_VERSION=' Dockerfile)" || {
             echo "Dockerfile ARG WUDICT_VERSION defaults must all be ${want}" >&2
+            exit 1
+          }
+      - name: Dockerfile build and runtime stages use the same Node.js image
+        run: |
+          test "$(grep -E '^FROM .*node:' Dockerfile | sed -E 's/.*(node:[^ ]+).*/\1/' | sort -u | wc -l)" -eq 1 || {
+            echo "Dockerfile node:* base images differ between stages" >&2
             exit 1
           }

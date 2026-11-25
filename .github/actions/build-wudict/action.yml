@@ -1,0 +1,42 @@
+name: Build wuDict
+description: >-
+  Build the unmodified upstream wuDict at a tag as a static purego binary, exactly as the Dockerfile
+  does (docs/adr/0002-build-wudict-from-source.md), for the gateway's contract tests.
+inputs:
+  version:
+    description: wuDict tag (vX.Y.Z)
+    required: true
+  repo:
+    description: wuDict GitHub repository
+    default: wuweidict/wudict
+outputs:
+  bin:
+    description: Absolute path of the built binary
+    value: ${{ steps.build.outputs.bin }}
+runs:
+  using: composite
+  steps:
+    - name: Fetch wuDict ${{ inputs.version }}
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        REPO: ${{ inputs.repo }}
+      run: |
+        rm -rf .cache/wudict-src
+        git -c advice.detachedHead=false clone --quiet --depth 1 \
+          --branch "$VERSION" "https://github.com/${REPO}.git" .cache/wudict-src
+    - uses: actions/setup-go@v6
+      with:
+        go-version-file: .cache/wudict-src/go.mod
+        cache-dependency-path: .cache/wudict-src/go.sum
+    - name: Build wuDict (purego, as in the image)
+      id: build
+      shell: bash
+      working-directory: .cache/wudict-src
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        CGO_ENABLED=0 go build -buildvcs=false -trimpath -tags purego \
+          -ldflags "-s -w -X github.com/wuweidict/wudict/internal/cli.Version=${VERSION}" \
+          -o ../wudict .
+        echo "bin=$(cd .. && pwd)/wudict" >> "$GITHUB_OUTPUT"

@@ -1,15 +1,28 @@
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    # The root also covers the composite action in .github/actions/.
+    directories: ["/", "/.github/actions/*"]
     schedule: { interval: weekly }
+    groups:
+      actions:
+        patterns: ["*"]
   - package-ecosystem: npm
     # Root of the npm workspace (shared/, gateway/, pwa/): one lockfile.
     directory: /
     schedule: { interval: weekly }
     groups:
+      # Better Auth stores sessions, accounts and OAuth tokens: every upgrade gets its own PR and is
+      # reviewed by hand against its changelog (and `gen-auth-schema.mjs --check`), never batched.
+      # Dependabot puts a dependency in the first group that matches, so this group comes first.
+      better-auth:
+        patterns: ["better-auth", "@better-auth/*"]
       dev-dependencies:
         dependency-type: development
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly }
+    ignore:
+      # Node.js stays on the LTS line chosen in AGENTS.md; a new major is a deliberate change.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]

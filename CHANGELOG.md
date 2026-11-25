@@ -91,6 +91,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   a weekly `VACUUM` when idle; the PWA's admin area gains Users (roles, suspend, sign out everywhere,
   delete, invite codes), Storage and Audit log pages.
 
+- Phase 8: `build-image.yml` publishes a multi-arch image to `ghcr.io/<owner>/pxdict` daily, on pushes
+  to `main` and on `vX.Y.Z` tags; it picks up the newest stable wuDict tag (`scripts/latest-wudict.sh`)
+  and pushes only after the API check (types from the new `openapi.yaml` + `tsc`), the contract tests
+  against that wuDict binary and the image smoke test pass. Tags: `latest`, `wudict-<tag>`,
+  `wudict-<tag>-<sha>`, and `X.Y.Z`/`X.Y` for releases (`docs/releasing.md`). Shared
+  `.github/actions/build-wudict`; Dependabot groups Better Auth separately and covers the `Dockerfile`
+  base images, which are now written out in each `FROM`.
+
 ### Changed
 - Reference wuDict version is v3.7.11 (v3.7.12 is only a pre-release).
 - The first Go gateway skeleton was replaced by TypeScript; Cloudflare Access is no longer part of the

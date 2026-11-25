@@ -112,6 +112,7 @@ PXDict/
 │   ├── design/wudict-pwa.md    # original design (archived, read-only, Vietnamese)
 │   ├── wudict-notes.md         # verified wuDict behaviour (Phase 0 output)
 │   ├── operations.md           # runbook (Phase 9)
+│   ├── releasing.md            # image tags, automatic wuDict updates, releases (Phase 8)
 │   └── adr/NNNN-*.md           # architecture decision records
 ├── shared/                     # @pxdict/shared: the contract between gateway and PWA
 │   ├── scripts/gen-api.mjs     # generates src/wudict.schema.d.ts
