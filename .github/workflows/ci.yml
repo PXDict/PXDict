@@ -25,15 +25,74 @@ jobs:
       - run: npm ci
       - name: Generated wuDict types are up to date
         run: npm run gen:api -- --check
+      - name: Database migrations match the schema
+        run: |
+          npm run db:generate -w @pxdict/gateway
+          git status --porcelain gateway/drizzle
+          test -z "$(git status --porcelain gateway/drizzle)"
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
       - run: npm run build
 
+  contract:
+    name: Contract tests (real wuDict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Fetch wuDict at the pinned tag
+        run: |
+          git -c advice.detachedHead=false clone --quiet --depth 1 \
+            --branch "$(tr -d '[:space:]' < WUDICT_VERSION)" https://github.com/wuweidict/wudict.git .cache/wudict-src
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .cache/wudict-src/go.mod
+          cache-dependency-path: .cache/wudict-src/go.sum
+      - name: Build wuDict (purego, as in the image)
+        working-directory: .cache/wudict-src
+        run: |
+          CGO_ENABLED=0 go build -buildvcs=false -trimpath -tags purego \
+            -ldflags "-s -w -X github.com/wuweidict/wudict/internal/cli.Version=$(tr -d '[:space:]' < ../../WUDICT_VERSION)" \
+            -o ../wudict .
+      - run: npm ci
+      - name: Contract tests
+        run: npm test -w @pxdict/gateway -- contract
+        env:
+          WUDICT_BIN: ${{ github.workspace }}/.cache/wudict
+
+  image:
+    name: Image build + smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: pxdict:dev
+          build-args: |
+            PXDICT_VERSION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - run: scripts/smoke-test.sh pxdict:dev
+
   scripts:
-    name: Shell scripts
+    name: Shell scripts and pins
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - name: shellcheck
-        run: shellcheck scripts/*.sh scripts/spike/*.sh
+        run: shellcheck scripts/*.sh scripts/spike/*.sh docker/entrypoint.sh
+      - name: Dockerfile default wuDict version equals WUDICT_VERSION
+        run: |
+          want="$(tr -d '[:space:]' < WUDICT_VERSION)"
+          count="$(grep -c "^ARG WUDICT_VERSION=${want}\$" Dockerfile)"
+          test "$count" -eq "$(grep -c '^ARG WUDICT_VERSION=' Dockerfile)" || {
+            echo "Dockerfile ARG WUDICT_VERSION defaults must all be ${want}" >&2
+            exit 1
+          }

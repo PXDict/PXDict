@@ -10,15 +10,21 @@
     "build": "node scripts/build.mjs",
     "start": "node dist/pxdict-gateway.mjs",
     "typecheck": "tsc --noEmit -p .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:check": "drizzle-kit check"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.11",
     "@pxdict/shared": "*",
+    "better-sqlite3": "^13.2.0",
+    "drizzle-orm": "^0.45.4",
     "hono": "^4.13.21",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "drizzle-kit": "^0.31.11",
     "esbuild": "^0.28.2",
     "tsx": "^4.23.15"
   }

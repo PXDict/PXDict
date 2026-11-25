@@ -148,6 +148,7 @@ log "wuDict on 127.0.0.1:$wudict_port (data: $data)"
 (
   cd gateway
   export LISTEN_ADDR="127.0.0.1:$gateway_port" \
+    PUBLIC_URL="http://127.0.0.1:5173" \
     DATA_DIR="$data" \
     WUDICT_URL="http://127.0.0.1:$wudict_port" \
     AUTH_TOKEN="$auth_token" \

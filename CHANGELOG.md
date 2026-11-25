@@ -18,6 +18,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - ADR 0004: the gateway is TypeScript and uses Better Auth for self-managed accounts with several sign-in
   methods (password, passkeys, social and OIDC providers, email link/code, two-factor).
 
+- Phase 2: gateway configuration for every later phase (`AUTH_TOKEN`, `PUBLIC_URL`, `COOKIE_SECURE`,
+  `REGISTRATION`, upload/proposal limits with byte sizes, history retention); SQLite database
+  (`better-sqlite3`, WAL, Drizzle migrations at startup) with the `dictionaries` and `audit_log`
+  tables; allowlisted streaming proxy to wuDict (`/api/dicts`, `/api/search`, `/api/suggest`,
+  `/res/…`) with Bearer injection, header/query allowlists, an explicit `dict=` list, NDJSON filtering
+  of filesystem fields and the builtin howto, and 404 for every other wuDict path; static PWA serving
+  (precompressed files, cache headers, SPA fallback); default security headers; `/healthz` checks
+  wuDict and the database; the `Dockerfile` (Node build → wuDict purego build → `node:26-alpine`
+  runtime with `tini`), `docker/entrypoint.sh`, `scripts/smoke-test.sh`, contract tests against the
+  real wuDict binary, and CI jobs for both.
+
 ### Changed
 - Reference wuDict version is v3.7.11 (v3.7.12 is only a pre-release).
 - The first Go gateway skeleton was replaced by TypeScript; Cloudflare Access is no longer part of the

@@ -270,6 +270,21 @@ Commands (no token / `Bearer spike-token` / `Bearer wrong`):
   (`io.github.wudict.version`), keep the README pointer to the corresponding source, and keep
   `wudict licenses` working (third-party notices are inside the binary).
 
+## Phase 2 additions
+
+Found while building the image and the contract tests (same tag, purego build):
+
+- `wudict serve` prints a banner on stdout that includes its **access key** as
+  `http://127.0.0.1:6888/?k=<AUTH_TOKEN>`. The entrypoint redacts the token from wuDict's output so it
+  never reaches container logs.
+- `/api/search?format=clean` rewrites root-absolute links such as `/res/…` into absolute URLs
+  (openapi.yaml), which would point at wuDict's loopback address. The gateway does not offer `clean`.
+- A UTF-8 DSL file (`#NAME`, tab-indented `[m1]…[/m]` bodies) is enough for a test dictionary:
+  after `GET /api/rescan` it is listed (`format: "dsl"`) and searchable. The smoke and contract tests
+  use one, so they need no Python tooling.
+- `GET /api/config` with the token answers 200 and without it 401: `/healthz` uses it to check both
+  that wuDict is up and that the gateway's token is right.
+
 ## Open questions
 
 Nothing blocks Phase 1. These have a fallback and are re-checked later:

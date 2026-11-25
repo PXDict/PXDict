@@ -3,7 +3,7 @@
 | Script | Phase | Purpose |
 |---|---|---|
 | `dev.sh` | 1 | Run wuDict + gateway (`tsx watch`) + Vite locally (see its header for options) |
-| `smoke-test.sh` | 2 | Smoke-test a built image |
+| `smoke-test.sh` | 2 | Smoke-test a built image: PWA, `/healthz`, 404 for non-allowlisted wuDict routes, loopback-only wuDict, a lookup through the gateway |
 | `latest-wudict.sh` | 8 | Print the latest stable wuDict tag |
 | `setup-swap.sh` | 9 | Enable swap on the host |
 | `server-update.sh` | 9 | Pull the new image and restart (self-hosted) |

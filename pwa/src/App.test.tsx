@@ -20,7 +20,11 @@ describe("App", () => {
   it("shows the gateway version once /healthz answers", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(() => Promise.resolve(Response.json({ status: "ok", version: "1.2.3" }))),
+      vi.fn(() =>
+        Promise.resolve(
+          Response.json({ status: "ok", version: "1.2.3", checks: { wudict: "ok", database: "ok" } }),
+        ),
+      ),
     );
     const root = mount();
     expect(root.querySelector("h1")?.textContent).toBe("PXDict");
