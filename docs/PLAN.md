@@ -367,14 +367,14 @@ audit log. Whole-dictionary deletion is checked against the real wuDict binary i
 
 **Goal:** as in original §7, plus tests for the multi-user parts.
 
-- [ ] `scripts/latest-wudict.sh`: newest **stable tag** of `wuweidict/wudict` (ignore pre-releases); no release-asset check, since the binary is built from source ([ADR 0002](adr/0002-build-wudict-from-source.md)).
-- [ ] `.github/workflows/build-image.yml` (per original §7.2) with these changes:
+- [x] `scripts/latest-wudict.sh`: newest **stable tag** of `wuweidict/wudict` (ignore pre-releases); no release-asset check, since the binary is built from source ([ADR 0002](adr/0002-build-wudict-from-source.md)).
+- [x] `.github/workflows/build-image.yml` (per original §7.2) with these changes:
   - API check: generate types from the new wuDict `openapi.yaml` + `tsc`; run the gateway's contract tests against the new wuDict binary;
   - new smoke test: log in as the bootstrap admin; `/api/search` without a session → 401, with a session → 200; regular user → `/app-api/admin/*` 403; `/setup` → 404; `/api/prefs` not exposed;
   - image tags: `latest`, `wudict-<tag>`, `wudict-<tag>-<sha>`; GPL label and wuDict source label.
-- [ ] Separate PXDict releases (semver) when gateway/PWA change: tag `vX.Y.Z` → image `:X.Y.Z`.
-- [ ] Dependabot for npm (root workspace), Docker base images, GitHub Actions; Better Auth upgrades reviewed by hand (read the changelog).
-- [ ] GHCR package set to Public.
+- [x] Separate PXDict releases (semver) when gateway/PWA change: tag `vX.Y.Z` → image `:X.Y.Z`.
+- [x] Dependabot for npm (root workspace), Docker base images, GitHub Actions; Better Auth upgrades reviewed by hand (read the changelog).
+- [ ] GHCR package set to Public (manual, after the first push: see [`releasing.md`](releasing.md#one-time-repository-setup)).
 
 **Done when:** CI builds automatically on a new wuDict release and **does not** push the image if contract or smoke tests fail.
 

@@ -26,6 +26,8 @@ npm run typecheck && npm run lint && npm test
   `feat(gateway): add the wuDict proxy`, `fix(pwa): wipe caches on logout`.
 - Tick the matching checklist item in `docs/PLAN.md` in the same PR.
 - Add an entry under `Unreleased` in [`CHANGELOG.md`](CHANGELOG.md) for user-visible changes.
+- Images, automatic wuDict updates and the release process are described in
+  [`docs/releasing.md`](docs/releasing.md).
 
 ## Never commit
 
