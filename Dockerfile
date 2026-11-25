@@ -45,7 +45,7 @@ RUN set -eu; \
 ############################################################
 # 2) wuDict, built from the upstream tag (docs/adr/0002-build-wudict-from-source.md)
 ############################################################
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS wudict
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS wudict
 RUN apk add --no-cache git
 # Keep the default equal to ./WUDICT_VERSION (CI checks it).
 ARG WUDICT_VERSION=v3.7.11
