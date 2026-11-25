@@ -677,6 +677,19 @@ export class ProposalService {
     return { visibility: p.approvedScope, ownerUserId: p.approvedScope === "private" ? p.userId : null };
   }
 
+  /** Withdraws an unfinished upload and deletes its files (storage administration); answers the bytes freed. */
+  async discardUpload(id: string): Promise<number> {
+    const p = this.#row(id);
+    if (p?.status !== "uploading") return 0;
+    this.#lock(id);
+    try {
+      this.#db.update(proposals).set({ status: "withdrawn", updatedAt: this.#now() }).where(eq(proposals.id, id)).run();
+      return await this.#removeFiles(id);
+    } finally {
+      this.#busy.delete(id);
+    }
+  }
+
   // Background clean-up (jobs.ts)
 
   /**

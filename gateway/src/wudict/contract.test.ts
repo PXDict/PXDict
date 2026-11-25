@@ -211,6 +211,40 @@ describe.skipIf(!bin)("contract with the real wuDict", () => {
     expect(hit).toMatchObject({ name: "Proposal", results: [{ Headword: "proposal" }] });
   }, 30_000);
 
+  it("storage administration deletes a whole dictionary through DELETE /api/library (Phase 7, Q11)", async () => {
+    const admin = (await h.signedIn({ email: "storage-admin@example.com", role: "admin" })).client;
+    const row = h.app.services.registry.get("proposed");
+    expect(row?.libraryDir).toBeTruthy();
+    fs.writeFileSync(path.join(dir, "dictionaries/proposed/readme.bak"), "left behind by wuDict");
+
+    const overview = (await (await admin.request("/app-api/admin/storage")).json()) as {
+      dicts: { id: string; originalsBlocked: string | null; deleteBlocked: string | null; indexBytes: number }[];
+    };
+    const d = overview.dicts.find((x) => x.id === "proposed");
+    // Deleting originals is verified for MDX only.
+    expect(d).toMatchObject({ originalsBlocked: "format_unsupported", deleteBlocked: null });
+    expect(d?.indexBytes).toBeGreaterThan(0);
+
+    const plan = (await (await admin.post("/app-api/admin/storage/plan", { items: [{ kind: "dict", target: "proposed" }] })).json()) as {
+      planId: string;
+      totalBytes: number;
+    };
+    const res = await admin.post("/app-api/admin/storage/execute", { planId: plan.planId });
+    const result = (await res.json()) as { bytesFreed: number; items: { status: string; reason: string | null }[] };
+    expect(result.items[0]).toMatchObject({ status: "done", reason: null });
+    expect(result.bytesFreed).toBe(plan.totalBytes);
+    expect(fs.existsSync(path.join(dir, "dictionaries/proposed"))).toBe(false);
+    expect(fs.existsSync(path.join(dir, "db", row?.libraryDir ?? "missing"))).toBe(false);
+    expect(h.app.services.registry.get("proposed")).toBeUndefined();
+
+    // wuDict no longer lists it, and the next sync does not bring it back.
+    h.catalog.invalidate();
+    const snap = await h.catalog.snapshot();
+    expect(snap.rows.some((r) => r.id === row?.wudictId)).toBe(false);
+    await h.app.services.registry.refresh();
+    expect(h.app.services.registry.all().map((r) => r.id)).not.toContain("proposed");
+  }, 30_000);
+
   it("an unknown resource is a 404", async () => {
     expect((await app.request(`/res/${dictId}/missing.png`)).status).toBe(404);
   });

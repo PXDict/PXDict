@@ -37,6 +37,8 @@ const known: Record<string, MessageKey> = {
   low_disk: "error.lowDisk",
   review_queue_full: "error.lowDisk",
   dict_id_taken: "error.dictIdTaken",
+  plan_expired: "error.planExpired",
+  busy: "error.busy",
 };
 
 export function errorMessage(err: unknown): string {

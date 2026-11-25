@@ -309,5 +309,11 @@ Nothing blocks Phase 1. These have a fallback and are re-checked later:
   `/r/` URLs carry their own signed token and the gateway accepts them without cookies or fetch
   metadata checks ([ADR 0006](adr/0006-article-rendering-and-offline.md)). The contract test checks a DSL
   `[s]` image through `/r/` against the real binary.
+- [ ] `info.txt`'s `media` line once media is packed: only the "not packed - …" wording was seen; the
+  gateway treats any other value as packed (`gateway/src/storage/admin.ts`, `parseInfoMediaPacked`),
+  and dictionaries the gateway indexed itself carry `media_packed` anyway. wuDict refuses
+  `prepared=0` without a media pack, so a wrong guess only shows an error.
+- [ ] Entries of `DB_DIR` other than index folders: the gateway offers a folder as an orphaned index only
+  when it holds `info.txt` or `text.db` and no dictionary uses it (Phase 7, ADR 0009).
 - [ ] arm64 purego build and its RAM numbers (Phase 8 builds multi-arch; the amd64 numbers are the budget).
 - [ ] Indexing RAM with a real large dictionary (Phase 9, on the target VPS).

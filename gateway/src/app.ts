@@ -22,6 +22,8 @@ import { createMeRoutes } from "./me/routes";
 import { createProposalRoutes } from "./proposals/routes";
 import { ProposalService } from "./proposals/service";
 import { SettingsStore } from "./settings/settings";
+import { StorageService } from "./storage/admin";
+import { createStorageRoutes } from "./storage/routes";
 import type { WudictCatalog } from "./wudict/catalog";
 import type { WudictClient } from "./wudict/client";
 import { createWudictRoutes } from "./wudict/proxy";
@@ -62,6 +64,9 @@ export interface AppServices {
   proposals: ProposalService;
   publisher: DictPublisher;
   registry: DictRegistry;
+  storage: StorageService;
+  /** Requests in flight and the time the last one started (jobs.ts runs VACUUM only when idle). */
+  activity: { inFlight: number; lastRequestAt: number };
 }
 
 export function createApp(opts: AppOptions): Hono<AuthEnv> & { services: AppServices } {
@@ -69,6 +74,16 @@ export function createApp(opts: AppOptions): Hono<AuthEnv> & { services: AppServ
   const app = new Hono<AuthEnv>();
   const guards = createGuards(auth, { requireAdmin2fa: config.auth.requireAdmin2fa });
 
+  const activity = { inFlight: 0, lastRequestAt: Date.now() };
+  app.use("*", async (_c, next) => {
+    activity.inFlight++;
+    activity.lastRequestAt = Date.now();
+    try {
+      await next();
+    } finally {
+      activity.inFlight--;
+    }
+  });
   app.use("*", securityHeaders({ hsts: config.publicUrl.protocol === "https:" }));
 
   app.get("/healthz", async (c) => {
@@ -151,6 +166,18 @@ export function createApp(opts: AppOptions): Hono<AuthEnv> & { services: AppServ
     createProposalRoutes({ db, guards, publicOrigin: config.publicUrl.origin, logger, proposals, registry, publisher }),
   );
 
+  const storage = new StorageService({
+    db,
+    dataDir: config.dataDir,
+    client: wudict,
+    catalog: opts.catalog,
+    registry,
+    publisher,
+    proposals,
+    logger,
+  });
+  app.route("/", createStorageRoutes({ db, storage }));
+
   app.all("/app-api/*", (c) => jsonError(c, 404, "not_found", "no such endpoint"));
 
   const signer = new ResourceSigner(config.auth.secret);
@@ -178,5 +205,5 @@ export function createApp(opts: AppOptions): Hono<AuthEnv> & { services: AppServ
     return jsonError(c, 500, "internal", "internal server error");
   });
 
-  return Object.assign(app, { services: { proposals, publisher, registry } });
+  return Object.assign(app, { services: { proposals, publisher, registry, storage, activity } });
 }

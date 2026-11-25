@@ -7,7 +7,12 @@ import type {
   AdminProposal,
   AdminProposalList,
   ApproveProposalRequest,
+  AuditPage,
   AuthMethods,
+  CreateInviteRequest,
+  CreateInviteResponse,
+  Invite,
+  InviteList,
   ChunkResponse,
   ClaimInviteRequest,
   CreateProposalRequest,
@@ -27,6 +32,10 @@ import type {
   ProposalUpdate,
   RejectProposalRequest,
   SaveFavoriteRequest,
+  StorageExecuteResult,
+  StorageItemRef,
+  StorageOverview,
+  StoragePlan,
   UpdateAdminDictRequest,
   UpdateMyDictsRequest,
   UpdateSettingsRequest,
@@ -41,7 +50,15 @@ export type {
   AdminDict,
   AdminProposal,
   ApproveProposalRequest,
+  AuditPage,
   AuthMethods,
+  CreateInviteRequest,
+  CreateInviteResponse,
+  Invite,
+  StorageExecuteResult,
+  StorageItemRef,
+  StorageOverview,
+  StoragePlan,
   Favorite,
   Health,
   HistoryEntry,
@@ -265,4 +282,45 @@ export function getIndexStatus(id: string, signal?: AbortSignal): Promise<IndexS
 /** POST /app-api/admin/dicts/{id}/index: indexes it again (after an error). */
 export function reindexDict(id: string): Promise<IndexStatus> {
   return sendJson<IndexStatus>("POST", `/app-api/admin/dicts/${id}/index`, {});
+}
+
+// Admin: storage (dry-run plan, then execute), audit log, invites
+
+/** GET /app-api/admin/storage: disk use and what can be cleaned up. */
+export function getStorage(signal?: AbortSignal): Promise<StorageOverview> {
+  return getJson<StorageOverview>("/app-api/admin/storage", signal);
+}
+
+/** POST /app-api/admin/storage/plan: a dry run listing every file that would be deleted. */
+export function planStorageDeletion(items: StorageItemRef[]): Promise<StoragePlan> {
+  return sendJson<StoragePlan>("POST", "/app-api/admin/storage/plan", { items });
+}
+
+/** POST /app-api/admin/storage/execute: deletes what the plan listed (files that changed are skipped). */
+export function executeStoragePlan(planId: string): Promise<StorageExecuteResult> {
+  return sendJson<StorageExecuteResult>("POST", "/app-api/admin/storage/execute", { planId });
+}
+
+/** GET /app-api/admin/audit: newest first; pass the previous page's nextCursor for more. */
+export function getAudit(o: { cursor?: number; action?: string } = {}, signal?: AbortSignal): Promise<AuditPage> {
+  const p = new URLSearchParams();
+  if (o.cursor) p.set("cursor", String(o.cursor));
+  if (o.action) p.set("action", o.action);
+  const qs = p.toString();
+  return getJson<AuditPage>(`/app-api/admin/audit${qs ? `?${qs}` : ""}`, signal);
+}
+
+/** GET /app-api/admin/invites */
+export async function getInvites(signal?: AbortSignal): Promise<Invite[]> {
+  return (await getJson<InviteList>("/app-api/admin/invites", signal)).invites;
+}
+
+/** POST /app-api/admin/invites: the code is in the answer, shown this once. */
+export function createInvite(req: CreateInviteRequest): Promise<CreateInviteResponse> {
+  return sendJson<CreateInviteResponse>("POST", "/app-api/admin/invites", req);
+}
+
+/** DELETE /app-api/admin/invites/{id} */
+export function deleteInvite(id: string): Promise<void> {
+  return sendEmpty("DELETE", `/app-api/admin/invites/${encodeURIComponent(id)}`);
 }

@@ -123,6 +123,8 @@ async function main(): Promise<void> {
     logger,
     historyDefaultRetentionDays: config.historyDefaultRetentionDays,
     proposals: app.services.proposals,
+    storage: app.services.storage,
+    activity: app.services.activity,
   });
 
   const server = serve(
