@@ -261,15 +261,16 @@ and OIDC are covered end to end by the gateway tests, passkeys only up to the We
 
 **Goal:** usable every day on a phone.
 
-- [ ] Login screen driven by `GET /app-api/auth/methods`: password (email or username), passkey button (conditional UI / autofill), one button per social/OIDC provider, magic link / email code when SMTP is on, two-factor step; register / invite code when enabled; Better Auth's vanilla client (`better-auth/client`) wrapped in `src/api/app.ts`. Global 401 handling → back to login, keeping the pending query.
-- [ ] Account settings: change password, manage passkeys, linked accounts, two-factor, active sessions.
-- [ ] Search box + debounced suggestions, search `mode`, keyboard shortcuts, Android `share_target` pre-filling `q`.
-- [ ] Multi-dictionary results (collapsible per dictionary, ordered by the user's settings).
-- [ ] **Style-B rendering**: iframe `sandbox="allow-scripts"` (+ `allow-popups` if needed), `postMessage` height sync, intercept internal links (`entry://`, `bword://`, `sound://`), play audio in the parent frame.
-- [ ] Resources in a sandboxed iframe carry no cookie → the gateway issues **signed URLs** for `/res/`: `/r/<token>/<dict>/<path>` where token = HMAC(user_id, dict, short expiry); the gateway rewrites the `/res/<id>/` prefix in entry HTML before returning it (wuDict emits only absolute `/res/<id>/…` references; relative `url()` inside CSS then stays under the signed prefix). Audio is a plain `<a href="/res/…/x.mp3">` (from `sound://`): intercept by extension.
-- [ ] Style A (same-origin, modelled on wuDict's `frame.js`) only for dictionaries with `trusted_render = true`.
-- [ ] `vite-plugin-pwa`: manifest, icons, `registerType: "prompt"`, `navigateFallbackDenylist` covering `/api`, `/res`, `/r`, `/app-api`; runtime caching as in original §6.2 but **cache names include the user id**; logout wipes the user's caches + IndexedDB.
-- [ ] i18n (en source, vi), light/dark theme; test on Android Chrome and iOS Safari (cookies in an installed PWA).
+- [x] Login screen driven by `GET /app-api/auth/methods`: password (email or username), passkey button (conditional UI / autofill), one button per social/OIDC provider, magic link / email code when SMTP is on, two-factor step; register / invite code when enabled; Better Auth's vanilla client (`better-auth/client`) wrapped in `src/api/app.ts`. Global 401 handling → back to login, keeping the pending query.
+- [x] Account settings: change password, manage passkeys, linked accounts, two-factor, active sessions.
+- [x] Search box + debounced suggestions, search `mode`, keyboard shortcuts, Android `share_target` pre-filling `q`.
+- [x] Multi-dictionary results (collapsible per dictionary, ordered by the user's settings). The order is the gateway's slot order; Phase 5 makes it the user's.
+- [x] **Style-B rendering**: iframe `sandbox="allow-scripts"` (+ `allow-popups` if needed), `postMessage` height sync, intercept internal links (`entry://`, `bword://`, `sound://`), play audio in the parent frame. The frame loads `/frame.html` (own CSP) instead of `srcdoc`, which would inherit the PWA's CSP ([ADR 0006](adr/0006-article-rendering-and-offline.md)).
+- [x] Resources in a sandboxed iframe carry no cookie → the gateway issues **signed URLs** for `/res/`: `/r/<token>/<dict>/<path>` where token = HMAC(user_id, dict, short expiry); the gateway rewrites the `/res/<id>/` prefix in entry HTML before returning it (wuDict emits only absolute `/res/<id>/…` references; relative `url()` inside CSS then stays under the signed prefix). Audio is a plain `<a href="/res/…/x.mp3">` (from `sound://`): intercept by extension.
+- [x] Style A (same-origin, modelled on wuDict's `frame.js`) only for dictionaries with `trusted_render = true`. The gateway sends `trustedRender` per dictionary; it is always false until admins can set it (Phase 6).
+- [x] `vite-plugin-pwa`: manifest, icons, `registerType: "prompt"`, `navigateFallbackDenylist` covering `/api`, `/res`, `/r`, `/app-api`; runtime caching as in original §6.2 but **cache names include the user id**; logout wipes the user's caches + IndexedDB. Custom service worker (`injectManifest`, `pwa/src/sw/sw.ts`); sandboxed frames bypass it, so their offline copy comes from the HTTP cache (ADR 0006).
+- [x] i18n (en source, vi), light/dark theme.
+- [ ] Test on Android Chrome and iOS Safari (cookies in an installed PWA, passkey ceremony, offline lookups through the HTTP cache, ADR 0006).
 
 **Done when:** PWA installed on Android + iOS, login works, lookups show images/audio, previously looked-up words are viewable offline.
 

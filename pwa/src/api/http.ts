@@ -32,11 +32,35 @@ export async function toApiError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, code, message);
 }
 
-/** Same-origin fetch with credentials and JSON accept header. */
-export function send(path: string, init: RequestInit = {}): Promise<Response> {
+type Listener = () => void;
+const unauthorizedListeners = new Set<Listener>();
+
+/**
+ * Registers a callback for any 401 from the gateway (the session ended or was revoked). The app uses
+ * it to go back to the login screen. Returns a function that removes the callback.
+ */
+export function onUnauthorized(listener: Listener): () => void {
+  unauthorizedListeners.add(listener);
+  return () => unauthorizedListeners.delete(listener);
+}
+
+/** Tells every listener the session is gone (also used by the Better Auth client wrapper). */
+export function notifyUnauthorized(): void {
+  for (const l of unauthorizedListeners) l();
+}
+
+/** Same-origin fetch with credentials and JSON accept header; a 401 notifies onUnauthorized. */
+export async function send(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   if (!headers.has("Accept")) headers.set("Accept", "application/json");
-  return fetch(path, { ...init, headers, credentials: "same-origin" });
+  const res = await fetch(path, { ...init, headers, credentials: "same-origin" });
+  if (res.status === 401) notifyUnauthorized();
+  return res;
+}
+
+/** True for a failure to reach the server at all (offline, DNS, connection refused). */
+export function isNetworkError(err: unknown): boolean {
+  return err instanceof TypeError;
 }
 
 /**

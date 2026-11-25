@@ -44,6 +44,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   requires a session. The entrypoint generates and keeps `BETTER_AUTH_SECRET` in `/data/gateway/`.
   ADR 0005.
 
+- Phase 4: the PWA for daily use. Login screen driven by `GET /app-api/auth/methods` (password with
+  email or username, passkey button and autofill, social/OIDC buttons, magic link, email code, two-factor
+  step, registration with invite codes, password reset page) on Better Auth's browser client; global 401
+  handling back to login with the pending page kept; account settings (password, passkeys, linked
+  accounts, TOTP two-factor with a QR code and backup codes, signed-in devices, language and theme);
+  search box with debounced suggestions, search modes, `/` and Ctrl/Cmd+K shortcuts and an Android share
+  target; streamed multi-dictionary results with lemma, skipped, deferred and failed dictionaries shown.
+  Articles render in `/frame.html` (own CSP) in an opaque-origin sandbox, or same-origin for
+  `trustedRender` dictionaries, with `postMessage` height sync, cross-reference lookups, audio played in
+  the page and external links in a new tab. The gateway signs article resource URLs
+  (`/r/<token>/<dict>/<path>`, HMAC, 1–2 h) and serves them without a session. `vite-plugin-pwa`
+  service worker with per-user caches for lookups, resources and the dictionary list, wiped on logout;
+  update prompt; PNG and maskable icons. `GET /app-api/me` returns the session id. ADR 0006.
+
 ### Changed
 - Reference wuDict version is v3.7.11 (v3.7.12 is only a pre-release).
 - The first Go gateway skeleton was replaced by TypeScript; Cloudflare Access is no longer part of the

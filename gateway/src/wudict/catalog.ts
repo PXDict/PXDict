@@ -1,14 +1,20 @@
 // Which wuDict dictionaries a request may use. The proxy always sends wuDict an explicit `dict=` list
 // built from this (never `all`), and filters /api/dicts with it.
 //
-// Until Phase 5 every signed-in user may use every dictionary wuDict lists except its builtin howto.
-// Phase 5 replaces WudictCatalog with the gateway's `dictionaries` + `user_dicts` tables.
+// Until Phase 5 every signed-in user may use every dictionary wuDict lists except its builtin howto, and
+// no dictionary is trusted. Phase 5 replaces WudictCatalog with the gateway's `dictionaries` +
+// `user_dicts` tables.
 import type { WudictClient } from "./client";
 import { isBuiltinDict } from "./sanitize";
 
 export interface DictAccess {
-  /** wuDict ids the caller may use, in the order results should be shown. */
-  allowedIds(signal?: AbortSignal): Promise<string[]>;
+  /** wuDict ids `userId` may use, in the order results should be shown. */
+  allowedIds(userId: string, signal?: AbortSignal): Promise<string[]>;
+  /**
+   * wuDict ids an admin marked `trusted_render`: the PWA may render them same-origin (style A) instead
+   * of in an opaque-origin sandbox.
+   */
+  trustedIds(signal?: AbortSignal): Promise<ReadonlySet<string>>;
 }
 
 /** wuDict answered /api/dicts with something other than 200/304. */
@@ -48,6 +54,10 @@ export class WudictCatalog implements DictAccess {
     this.#ttlMs = opts.ttlMs ?? 5_000;
     this.#maxBytes = opts.maxBytes ?? 8 * 2 ** 20;
     this.#now = opts.now ?? Date.now;
+  }
+
+  trustedIds(): Promise<ReadonlySet<string>> {
+    return Promise.resolve(new Set());
   }
 
   async allowedIds(): Promise<string[]> {

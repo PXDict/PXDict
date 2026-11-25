@@ -138,6 +138,7 @@ export function createAuthRoutes({ config, db, guards, emailEnabled }: AuthRoute
         createdAt: new Date(user.createdAt).toISOString(),
       },
       session: {
+        id: session.id,
         expiresAt: new Date(session.expiresAt).toISOString(),
         impersonatedBy: session.impersonatedBy ?? null,
       },

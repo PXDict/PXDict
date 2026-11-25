@@ -2,6 +2,9 @@
 // explicit `dict=` list from DictAccess, and allowlisted headers both ways. The browser's Cookie and
 // Authorization headers and wuDict's Set-Cookie never cross, because headers are copied by allowlist.
 // Streams (NDJSON) are forwarded line by line as wuDict produces them.
+//
+// Resources are served twice: /res/<dict>/<path> for the signed-in PWA itself (session cookie), and
+// /r/<token>/<dict>/<path> for sandboxed dictionary iframes, which send no cookie (signed-url.ts).
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { z } from "zod";
@@ -14,13 +17,16 @@ import { WudictTimeoutError, WudictUnavailableError, type WudictClient } from ".
 import { ndjsonBody, ndjsonContentType, ndjsonTransform } from "./ndjson";
 import { checkResourcePath, dictIdPattern, pickQuery, searchQuery, suggestQuery } from "./routes";
 import { mapDictsLine, mapSearchLine } from "./sanitize";
+import { signArticle, type ResourceSigner } from "./signed-url";
 
 export interface WudictRoutesOptions {
   client: WudictClient;
   access: DictAccess;
   logger: Logger;
-  /** Runs before every proxied route (the session check); routes that are not allowlisted stay 404. */
-  guard?: MiddlewareHandler<AuthEnv>;
+  /** Runs before every session-protected route; routes that are not allowlisted stay 404. */
+  guard: MiddlewareHandler<AuthEnv>;
+  /** Signs the resource URLs in search results for sandboxed iframes. */
+  signer: ResourceSigner;
 }
 
 /** Response headers copied from wuDict for resources. Everything else (Set-Cookie, …) is dropped. */
@@ -45,14 +51,15 @@ const resourceCsp = "sandbox; default-src 'none'; img-src 'self' data:; media-sr
 /** wuDict refuses the gateway itself: 401 wrong token, 403 fetch-metadata guard, 421 unknown Host. */
 const refusedStatuses = new Set([401, 403, 421]);
 
-export function createWudictRoutes({ client, access, logger, guard }: WudictRoutesOptions): Hono<AuthEnv> {
+export function createWudictRoutes({ client, access, logger, guard, signer }: WudictRoutesOptions): Hono<AuthEnv> {
   const app = new Hono<AuthEnv>();
-  if (guard) {
-    // Only for the methods that have a route, so anything else stays a plain 404.
-    const guardReads: MiddlewareHandler<AuthEnv> = (c, next) =>
-      c.req.method === "GET" || c.req.method === "HEAD" ? guard(c, next) : next();
-    for (const path of ["/api/dicts", "/api/search", "/api/suggest", "/res/:dict/*"]) app.use(path, guardReads);
-  }
+  // Only for the methods that have a route, so anything else stays a plain 404. /r/* carries its own
+  // credential (the signed token) instead.
+  const guardReads: MiddlewareHandler<AuthEnv> = (c, next) =>
+    c.req.method === "GET" || c.req.method === "HEAD" ? guard(c, next) : next();
+  for (const path of ["/api/dicts", "/api/search", "/api/suggest", "/res/:dict/*"]) app.use(path, guardReads);
+
+  const userId = (c: Context<AuthEnv>) => c.get("session").user.id;
 
   /** The gateway's token or Host is wrong: a deployment problem, never the user's. */
   const logRefused = (path: string, status: number) => {
@@ -122,14 +129,18 @@ export function createWudictRoutes({ client, access, logger, guard }: WudictRout
 
   app.get("/api/dicts", async (c) => {
     try {
-      const allowed = new Set(await access.allowedIds(c.req.raw.signal));
+      const [allowedList, trusted] = await Promise.all([
+        access.allowedIds(userId(c), c.req.raw.signal),
+        access.trustedIds(c.req.raw.signal),
+      ]);
+      const allowed = new Set(allowedList);
       const res = await client.request({
         path: "/api/dicts",
         headers: new Headers({ Accept: ndjsonContentType }),
         signal: c.req.raw.signal,
       });
       if (res.status !== 200) return await upstreamError(c, res);
-      return streamNdjson(c, res, (line) => mapDictsLine(line, allowed));
+      return streamNdjson(c, res, (line) => mapDictsLine(line, allowed, trusted));
     } catch (err) {
       return fail(c, err);
     }
@@ -139,7 +150,8 @@ export function createWudictRoutes({ client, access, logger, guard }: WudictRout
     const q = parse(c, searchQuery, Object.keys(searchQuery.shape));
     if (!q.ok) return jsonError(c, 400, "bad_request", "invalid search parameters");
     try {
-      const dicts = resolveDicts(q.data.dict, await access.allowedIds(c.req.raw.signal));
+      const user = userId(c);
+      const dicts = resolveDicts(q.data.dict, await access.allowedIds(user, c.req.raw.signal));
       if (!dicts.length) {
         // wuDict answers 404 for a list where no id resolves; nothing to search is an empty result.
         c.header("Cache-Control", "no-store");
@@ -161,7 +173,13 @@ export function createWudictRoutes({ client, access, logger, guard }: WudictRout
       });
       if (res.status !== 200) return await upstreamError(c, res);
       const allowed = new Set(dicts);
-      return streamNdjson(c, res, (line) => mapSearchLine(line, allowed));
+      const prefixes = new Map<string, string>();
+      const sign = (body: string, dict: string) => {
+        let prefix = prefixes.get(dict);
+        if (prefix === undefined) prefixes.set(dict, (prefix = signer.prefix(user, dict)));
+        return signArticle(body, dict, prefix);
+      };
+      return streamNdjson(c, res, (line) => mapSearchLine(line, allowed, sign));
     } catch (err) {
       return fail(c, err);
     }
@@ -172,7 +190,7 @@ export function createWudictRoutes({ client, access, logger, guard }: WudictRout
     if (!q.ok) return jsonError(c, 400, "bad_request", "invalid suggest parameters");
     c.header("Cache-Control", "no-store");
     try {
-      const dicts = resolveDicts(q.data.dict, await access.allowedIds(c.req.raw.signal));
+      const dicts = resolveDicts(q.data.dict, await access.allowedIds(userId(c), c.req.raw.signal));
       if (!dicts.length) return c.json({ words: [] });
       const query = new URLSearchParams({ q: q.data.q, dict: dicts.join(",") });
       if (q.data.mode) query.set("mode", q.data.mode);
@@ -191,15 +209,17 @@ export function createWudictRoutes({ client, access, logger, guard }: WudictRout
     }
   });
 
-  app.get("/res/:dict/*", async (c) => {
-    const dict = c.req.param("dict");
-    // The raw (still percent-encoded) remainder after /res/<dict>/.
+  /**
+   * Forwards one resource request for `user`. `prefix` is the path before `<rest>` (e.g. `/res/<dict>/`);
+   * `crossOrigin` is set for /r/*, whose callers are opaque-origin iframes (fonts need CORS there).
+   */
+  const serveResource = async (c: Context, user: string, dict: string, prefix: string, crossOrigin: boolean) => {
+    // The raw (still percent-encoded) remainder after the prefix.
     const rawPath = new URL(c.req.url).pathname;
-    const prefix = `/res/${dict}/`;
     const rest = rawPath.startsWith(prefix) ? checkResourcePath(rawPath.slice(prefix.length)) : undefined;
     if (!dictIdPattern.test(dict) || rest === undefined) return jsonError(c, 404, "not_found", "not found");
     try {
-      if (!(await access.allowedIds(c.req.raw.signal)).includes(dict)) {
+      if (!(await access.allowedIds(user, c.req.raw.signal)).includes(dict)) {
         return jsonError(c, 404, "not_found", "not found");
       }
       const headers = new Headers();
@@ -220,15 +240,32 @@ export function createWudictRoutes({ client, access, logger, guard }: WudictRout
         const v = res.headers.get(h);
         if (v !== null) out.set(h, v);
       }
-      // Access is per user: never let a shared cache (e.g. a CDN) keep it.
-      out.set("Cache-Control", "private, max-age=86400");
+      // Access is per user: never let a shared cache (e.g. a CDN) keep it. Signed URLs are cached for
+      // long: sandboxed iframes bypass the service worker, so the browser's HTTP cache is what shows
+      // earlier lookups offline (ADR 0006). A dictionary's content changes only with its wuDict id.
+      out.set("Cache-Control", crossOrigin ? "private, max-age=2592000" : "private, max-age=86400");
       out.set("Content-Security-Policy", resourceCsp);
       // Sandboxed iframes have an opaque origin; same-origin CORP would block their subresources.
       out.set("Cross-Origin-Resource-Policy", "cross-origin");
+      // The token in the URL is the credential, never a cookie, so a wildcard reveals nothing more.
+      if (crossOrigin) out.set("Access-Control-Allow-Origin", "*");
       return new Response(res.body, { status: res.status, headers: out });
     } catch (err) {
       return fail(c, err);
     }
+  };
+
+  app.get("/res/:dict/*", (c) => {
+    const dict = c.req.param("dict");
+    return serveResource(c, userId(c), dict, `/res/${dict}/`, false);
+  });
+
+  app.get("/r/:token/:dict/*", (c) => {
+    const { token, dict } = c.req.param();
+    const verified = signer.verify(token, dict);
+    // Same answer as an unknown resource: a wrong or expired token reveals nothing.
+    if (!verified) return jsonError(c, 404, "not_found", "not found");
+    return serveResource(c, verified.userId, dict, `/r/${token}/${dict}/`, true);
   });
 
   return app;

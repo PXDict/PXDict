@@ -43,11 +43,11 @@ export function sanitizeDict(dict: Json): Json {
 }
 
 /**
- * Maps one /api/dicts line: rows outside `allowed` and builtins are dropped, rows are sanitised,
- * `begin.total` and `end.etag` are removed (both describe wuDict's whole library, not this user's
- * view). Unknown line types are dropped.
+ * Maps one /api/dicts line: rows outside `allowed` and builtins are dropped, rows are sanitised and get
+ * PXDict's `trustedRender` flag, `begin.total` and `end.etag` are removed (both describe wuDict's whole
+ * library, not this user's view). Unknown line types are dropped.
  */
-export function mapDictsLine(line: unknown, allowed: ReadonlySet<string>): unknown {
+export function mapDictsLine(line: unknown, allowed: ReadonlySet<string>, trusted: ReadonlySet<string>): unknown {
   if (!isObject(line)) return undefined;
   switch (line.t) {
     case "begin":
@@ -59,7 +59,7 @@ export function mapDictsLine(line: unknown, allowed: ReadonlySet<string>): unkno
       if (!isObject(dict) || isBuiltinDict(dict) || typeof dict.id !== "string" || !allowed.has(dict.id)) {
         return undefined;
       }
-      return { t: "dict", dict: sanitizeDict(dict) };
+      return { t: "dict", dict: { ...sanitizeDict(dict), trustedRender: trusted.has(dict.id) } };
     }
     case "busy": {
       const busy = Array.isArray(line.busy) ? line.busy : [];
@@ -74,15 +74,28 @@ export function mapDictsLine(line: unknown, allowed: ReadonlySet<string>): unkno
 }
 
 /**
- * Maps one /api/search line: error strings become generic. The gateway always sends an explicit `dict=`
+ * Maps one /api/search line: error strings become generic and each article's `/res/<dict>/`
+ * references go through `rewriteBody` (signed URLs). The gateway always sends an explicit `dict=`
  * list, so wuDict only answers for allowed dictionaries; a hit for any other one is dropped anyway.
  * `begin.slots` is passed unchanged because hits refer to slots by index.
  */
-export function mapSearchLine(line: unknown, allowed: ReadonlySet<string>): unknown {
+export function mapSearchLine(
+  line: unknown,
+  allowed: ReadonlySet<string>,
+  rewriteBody: (body: string, dict: string) => string = (b) => b,
+): unknown {
   if (!isObject(line)) return undefined;
   if (line.t === "hit") {
-    if (typeof line.dict !== "string" || !allowed.has(line.dict)) return undefined;
-    return typeof line.error === "string" && line.error ? { ...line, error: genericError } : line;
+    const dict = line.dict;
+    if (typeof dict !== "string" || !allowed.has(dict)) return undefined;
+    const out: Json = { ...line };
+    if (typeof out.error === "string" && out.error) out.error = genericError;
+    if (Array.isArray(line.results)) {
+      out.results = line.results.map((r: unknown) =>
+        isObject(r) && typeof r.Body === "string" ? { ...r, Body: rewriteBody(r.Body, dict) } : r,
+      );
+    }
+    return out;
   }
   return line;
 }

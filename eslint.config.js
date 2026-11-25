@@ -26,14 +26,19 @@ export default tseslint.config(
     languageOptions: { globals: globals.browser },
   },
   {
+    files: ["pwa/src/sw/**"],
+    languageOptions: { globals: globals.serviceworker },
+  },
+  {
     // shared/ is used by both sides: no Node or DOM globals.
     files: ["shared/src/**"],
     languageOptions: { globals: {} },
   },
   {
     // UI code never calls fetch directly: every request goes through src/api/*.ts (AGENTS.md §5).
+    // The service worker (src/sw/) is the network layer itself.
     files: ["pwa/src/**/*.{ts,tsx}"],
-    ignores: ["pwa/src/api/**", "**/*.test.{ts,tsx}"],
+    ignores: ["pwa/src/api/**", "pwa/src/sw/**", "**/*.test.{ts,tsx}"],
     rules: {
       "no-restricted-globals": [
         "error",

@@ -133,8 +133,12 @@ PXDict/
 ├── pwa/                        # @pxdict/pwa: Vite + Preact + TypeScript
 │   └── src/
 │       ├── api/
-│       │   ├── wudict.ts       # the ONLY adapter for wuDict /api, /res
-│       │   └── app.ts          # the ONLY adapter for /app-api
+│       │   ├── wudict.ts       # the ONLY adapter for wuDict /api, /res, /r
+│       │   ├── app.ts          # the ONLY adapter for /app-api that UI code imports
+│       │   └── auth.ts         # Better Auth's browser client, re-exported by app.ts
+│       ├── frame/article.ts    # article frame protocol (with public/frame.html, ADR 0006)
+│       ├── sw/sw.ts            # service worker (vite-plugin-pwa injectManifest)
+│       ├── views/              # screens and components
 │       └── i18n/               # en.json (source), vi.json
 ├── docker/entrypoint.sh
 ├── Dockerfile
@@ -201,6 +205,10 @@ them, say so and why.
 - `build.assetsDir = "app-assets"` (avoids wuDict's `/assets/*`) — do not change.
 - Service worker caches are **namespaced per user** and **wiped on logout** (shared devices).
 - Never cache `/app-api/*` in the service worker.
+- Dictionary articles render only through `src/frame/article.ts` + `public/frame.html`, never with
+  `innerHTML`, `srcdoc` or `dangerouslySetInnerHTML` in the PWA's own document
+  ([ADR 0006](docs/adr/0006-article-rendering-and-offline.md)). Messages from article frames are
+  untrusted: check the source window and origin, validate the shape.
 
 ## 6. Security — things that must not go wrong
 
