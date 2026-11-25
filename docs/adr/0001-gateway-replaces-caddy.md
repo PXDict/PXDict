@@ -1,6 +1,6 @@
-# 0001. A Go gateway replaces Caddy in front of wuDict
+# 0001. A gateway replaces Caddy in front of wuDict
 
-- Status: accepted
+- Status: accepted; the implementation language (Go) is superseded by [ADR 0004](0004-typescript-gateway-better-auth.md)
 - Date: 2026-11-24
 
 ## Context
@@ -13,7 +13,7 @@ token at all (`/api/dicts`, `/api/search`, `/res/`).
 
 ## Decision
 
-A small Go service, `pxdict-gateway`, listens on `:8080` and:
+A small service, `pxdict-gateway` (originally Go, now TypeScript per ADR 0004), listens on `:8080` and:
 
 - serves the static PWA (Caddy is removed);
 - owns accounts, sessions and all per-user data in its own SQLite database;
@@ -26,8 +26,9 @@ The container still has one port and one volume; `entrypoint.sh` supervises wuDi
 ## Consequences
 
 - Users never see the wuDict token; wuDict admin routes are unreachable for regular users.
-- Cloudflare Access becomes optional rather than required.
+- Cloudflare Access is no longer needed (ADR 0004 drops it entirely).
 - `TRUSTED_HOSTS` is no longer needed.
 - We maintain more code (auth, proxy) and must keep the allowlist in sync with wuDict — covered by
   contract tests in CI.
-- Go keeps the runtime footprint small and matches wuDict's toolchain.
+- ~~Go keeps the runtime footprint small and matches wuDict's toolchain.~~ Superseded: the gateway is
+  TypeScript ([ADR 0004](0004-typescript-gateway-better-auth.md)).

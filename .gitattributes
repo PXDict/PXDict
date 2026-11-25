@@ -5,4 +5,4 @@
 *.ico binary
 *.mdx binary
 *.mdd binary
-pwa/src/api/*.schema.d.ts linguist-generated=true
+shared/src/*.schema.d.ts linguist-generated=true

@@ -13,7 +13,8 @@ export class ApiError extends Error {
   }
 }
 
-interface ErrorBody {
+/** The gateway's error shape (ErrorBody in @pxdict/shared), read defensively: any body may arrive. */
+interface MaybeErrorBody {
   error?: { code?: unknown; message?: unknown };
 }
 
@@ -22,7 +23,7 @@ export async function toApiError(res: Response): Promise<ApiError> {
   let code = "http_" + String(res.status);
   let message = res.statusText || code;
   try {
-    const body = (await res.json()) as ErrorBody;
+    const body = (await res.json()) as MaybeErrorBody;
     if (typeof body.error?.code === "string") code = body.error.code;
     if (typeof body.error?.message === "string") message = body.error.message;
   } catch {

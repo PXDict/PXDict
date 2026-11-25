@@ -217,7 +217,7 @@ Commands (no token / `Bearer spike-token` / `Bearer wrong`):
   if the files stay in `DICT_DIR`). **No dry run** in the API; `wudict rm` (CLI) prints a dry run but
   refuses to delete while a server is running.
 - **Impact:** the gateway computes the dry-run itself (it knows the files), calls `DELETE /api/library`,
-  then removes the remaining files of `/data/dictionaries/<dict_id>/` via `storage.SafeJoin`.
+  then removes the remaining files of `/data/dictionaries/<dict_id>/` via the gateway's `safeJoin` (`gateway/src/storage/safe-path.ts`).
 
 ### Q12. `wudict ingest` and copying `db/`
 

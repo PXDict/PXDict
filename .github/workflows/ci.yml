@@ -13,46 +13,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  gateway:
-    name: Gateway (Go)
+  typescript:
+    name: TypeScript (shared, gateway, PWA)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: gateway
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: gateway/go.mod
-          cache-dependency-path: gateway/go.mod
-      - name: gofmt
-        run: test -z "$(gofmt -l . | tee /dev/stderr)"
-      - name: go vet
-        run: go vet ./...
-      - name: staticcheck
-        run: go run honnef.co/go/tools/cmd/staticcheck@2026.2.2 ./...
-      - name: go test
-        run: go test -race ./...
-      - name: build
-        env:
-          CGO_ENABLED: "0"
-        run: go build -o /dev/null ./cmd/pxdict-gateway
-
-  pwa:
-    name: PWA (TypeScript)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: pwa
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: pwa/package-lock.json
       - run: npm ci
-      - name: Generated API types are up to date
+      - name: Generated wuDict types are up to date
         run: npm run gen:api -- --check
       - run: npm run typecheck
       - run: npm run lint

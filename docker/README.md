@@ -1,3 +1,3 @@
 # docker
 
-Container runtime files: `entrypoint.sh` (supervises wuDict + gateway). Added in Phase 2.
+Container runtime files: `entrypoint.sh` (supervises wuDict + the Node.js gateway). Added in Phase 2.

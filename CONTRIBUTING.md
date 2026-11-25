@@ -18,12 +18,12 @@ User-facing strings go through the i18n files (`pwa/src/i18n/`).
 ```bash
 git switch -c feat/<short-name>
 # make changes
-cd gateway && go test ./... && go vet ./...
-cd pwa && npm run typecheck && npm run lint && npm test
+npm ci
+npm run typecheck && npm run lint && npm test
 ```
 
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/):
-  `feat(gateway): add session middleware`, `fix(pwa): wipe caches on logout`.
+  `feat(gateway): add the wuDict proxy`, `fix(pwa): wipe caches on logout`.
 - Tick the matching checklist item in `docs/PLAN.md` in the same PR.
 - Add an entry under `Unreleased` in [`CHANGELOG.md`](CHANGELOG.md) for user-visible changes.
 
