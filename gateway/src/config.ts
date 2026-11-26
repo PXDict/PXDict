@@ -99,6 +99,12 @@ export interface Config {
    * publishes it (ADR 0007).
    */
   builtinDictVisibility: "global" | "hidden";
+  /**
+   * METRICS, default false: serve Prometheus metrics at /metrics, to admins (session) and to callers
+   * with METRICS_TOKEN as a bearer token. Never to everyone, and not to "loopback" callers: behind a
+   * proxy on the same host every request comes from loopback.
+   */
+  metrics: { enabled: boolean; token: string | undefined };
   /** Sign-in methods and accounts. */
   auth: AuthConfig;
 }
@@ -129,10 +135,12 @@ export const defaults = {
   SMTP_URL: "",
   MAIL_FROM: "",
   CLIENT_IP_HEADER: "",
+  METRICS: "false",
+  METRICS_TOKEN: "",
 } as const;
 
 /** Variables whose values must never appear in error messages or logs. */
-const secretKeys = new Set<string>(["AUTH_TOKEN", "BETTER_AUTH_SECRET", "ADMIN_PASSWORD", "SMTP_URL"]);
+const secretKeys = new Set<string>(["AUTH_TOKEN", "BETTER_AUTH_SECRET", "ADMIN_PASSWORD", "SMTP_URL", "METRICS_TOKEN"]);
 const isSecretKey = (key: string) => secretKeys.has(key) || key.endsWith("_CLIENT_SECRET");
 
 /** The smallest password PXDict accepts (Better Auth's minPasswordLength, ADMIN_PASSWORD). */
@@ -302,6 +310,13 @@ const schema = z.object({
       .regex(/^[A-Za-z0-9-]+$/, "must be a header name such as cf-connecting-ip")
       .transform((h) => h.toLowerCase()),
   ),
+  METRICS: flag,
+  METRICS_TOKEN: optional(
+    z
+      .string()
+      .min(32, "must be a random string of at least 32 characters (e.g. openssl rand -hex 32)")
+      .regex(/^[\x21-\x7e]+$/, "must contain printable ASCII characters only (no spaces)"),
+  ),
 });
 
 /** Reads the provider variables, whose names are only known at runtime. */
@@ -392,6 +407,7 @@ export function loadConfig(env: Env = process.env): Config {
   const c = result.data;
   if (c.SMTP_URL && !c.MAIL_FROM) report("MAIL_FROM", "must be set when SMTP_URL is set");
   if (c.MAIL_FROM && !c.MAIL_FROM.includes("@")) report("MAIL_FROM", 'must be an address such as "PXDict <dict@example.com>"');
+  if (c.METRICS_TOKEN && !c.METRICS) report("METRICS_TOKEN", "is set but METRICS is off; set METRICS=true or remove it");
   if ((c.ADMIN_PASSWORD || c.ADMIN_USERNAME) && !c.ADMIN_EMAIL) report("ADMIN_EMAIL", "must be set when ADMIN_PASSWORD or ADMIN_USERNAME is set");
   if (byKey.size) throw new ConfigError([...byKey.values()]);
 
@@ -414,6 +430,7 @@ export function loadConfig(env: Env = process.env): Config {
     minFreeBytes: c.MIN_FREE_BYTES,
     historyDefaultRetentionDays: c.HISTORY_DEFAULT_RETENTION_DAYS,
     builtinDictVisibility: c.BUILTIN_DICT_VISIBILITY,
+    metrics: { enabled: c.METRICS, token: c.METRICS_TOKEN },
     auth: {
       secret: c.BETTER_AUTH_SECRET,
       bootstrapAdmin: c.ADMIN_EMAIL

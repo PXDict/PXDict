@@ -113,6 +113,7 @@ PXDict/
 │   ├── wudict-notes.md         # verified wuDict behaviour (Phase 0 output)
 │   ├── operations.md           # runbook (Phase 9)
 │   ├── releasing.md            # image tags, automatic wuDict updates, releases (Phase 8)
+│   ├── security-review.md      # Phase 10 security review: findings, what was checked, open items
 │   └── adr/NNNN-*.md           # architecture decision records
 ├── shared/                     # @pxdict/shared: the contract between gateway and PWA
 │   ├── scripts/gen-api.mjs     # generates src/wudict.schema.d.ts
@@ -125,7 +126,7 @@ PXDict/
 │   │   ├── main.ts             # entry point: config, listen, graceful shutdown
 │   │   ├── app.ts              # builds the Hono app (routes, middleware)
 │   │   ├── config.ts           # env parsing (zod), defaults, validation
-│   │   ├── http/               # error shape, shared middleware
+│   │   ├── http/               # error shape, shared middleware, metrics (ADR 0010)
 │   │   ├── db/                 # Drizzle schema + client (Phase 2)
 │   │   ├── auth/               # Better Auth instance, plugins, guards (Phase 3)
 │   │   ├── wudict/             # client, proxy, route allowlist, test fake (Phase 2)
@@ -148,7 +149,7 @@ PXDict/
 │       └── i18n/               # en.json (source), vi.json
 ├── docker/entrypoint.sh
 ├── Dockerfile
-├── scripts/                    # dev.sh, smoke-test.sh, latest-wudict.sh, setup-swap.sh, server-update.sh, backup.sh
+├── scripts/                    # dev.sh, smoke-test.sh, latest-wudict.sh, setup-swap.sh, server-update.sh, backup.sh, load-test.mjs
 ├── deploy/                     # compose.yaml, .env.example, systemd/
 └── .github/                    # workflows, issue/PR templates, dependabot
 ```

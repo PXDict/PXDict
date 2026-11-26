@@ -9,6 +9,7 @@
   "nav.history": "History",
   "nav.favorites": "Saved",
   "nav.dicts": "Dictionaries",
+  "nav.skip": "Skip to content",
   "nav.main": "Main",
   "update.available": "A new version of PXDict is ready.",
   "update.reload": "Reload",

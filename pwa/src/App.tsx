@@ -1,5 +1,5 @@
 // The app shell: who is signed in (with an offline fallback), the routes, and the header.
-import { useCallback, useEffect, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import {
   getMe,
   isNetworkError,
@@ -41,6 +41,23 @@ type Session =
 
 /** Paths the login screen owns while signed out. */
 const publicPaths = new Set(["/login", "/reset-password"]);
+
+/** The page name in the document title (the search page sets its own title from the query). */
+function pageTitle(path: string): string | undefined {
+  if (path === "/account") return t("account.title");
+  if (path === "/history") return t("nav.history");
+  if (path === "/favorites") return t("nav.favorites");
+  if (path === "/dictionaries") return t("nav.dicts");
+  if (path === "/proposals") return t("nav.propose");
+  if (path === "/admin" || path.startsWith("/admin/")) return t("admin.nav");
+  return undefined;
+}
+
+/** The element that holds the current page; focused after client-side navigation. */
+const contentId = "content";
+const focusContent = () => {
+  document.getElementById(contentId)?.focus();
+};
 
 export function App() {
   const loc = useLocation();
@@ -105,6 +122,19 @@ export function App() {
       }),
     [],
   );
+
+  // After client-side navigation, move focus to the new page (screen readers announce it, keyboard
+  // users continue from there) and name it in the title. The search page focuses its own input.
+  const shownPath = useRef<string | undefined>(undefined);
+  const inApp = session.kind === "signed-in" || session.kind === "offline";
+  useEffect(() => {
+    if (!inApp) return;
+    const previous = shownPath.current;
+    shownPath.current = loc.path;
+    const title = pageTitle(loc.path);
+    if (title !== undefined) document.title = `${title} – ${t("app.name")}`;
+    if (previous !== undefined && previous !== loc.path && loc.path !== "/") focusContent();
+  }, [inApp, loc.path]);
 
   // Signed out on a private page: go to the login screen and come back afterwards.
   useEffect(() => {
@@ -210,6 +240,16 @@ export function App() {
 
   return (
     <>
+      <a
+        class="skip-link"
+        href={`#${contentId}`}
+        onClick={(e) => {
+          e.preventDefault();
+          focusContent();
+        }}
+      >
+        {t("nav.skip")}
+      </a>
       <header class="topbar">
         <a class="brand" href="/" onClick={(e) => { e.preventDefault(); navigate("/"); }}>
           {t("app.name")}
@@ -294,7 +334,9 @@ export function App() {
           </button>
         </div>
       )}
-      <div class="shell">{page}</div>
+      <div class="shell" id={contentId} tabIndex={-1}>
+        {page}
+      </div>
       <UpdatePrompt />
     </>
   );

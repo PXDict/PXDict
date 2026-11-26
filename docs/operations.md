@@ -34,7 +34,9 @@ Paths below assume the install folder `/opt/pxdict`:
 - [Adding dictionaries](#adding-dictionaries) · [Indexing off-box](#indexing-off-box)
 - [Updates](#updates) · [Rolling back](#rolling-back)
 - [Backups](#backups) · [Restoring a backup](#restoring-a-backup)
-- [Health and logs](#health-and-logs)
+- [Health and logs](#health-and-logs) · [Metrics](#metrics)
+- [Load testing](#load-testing)
+- [Verify in production](#verify-in-production)
 
 ## First install
 
@@ -345,8 +347,97 @@ restore is not proven until you have signed in to the restored copy.
 - `GET /healthz` checks the gateway, its database and wuDict (`503` when one is down); Docker's
   healthcheck uses it, so `docker compose ps` shows `healthy`.
 - Logs are JSON lines: `sudo docker compose logs -f app`. Compose keeps 5 × 10 MB per container.
+  `LOG_LEVEL=debug` adds one `request` line per request (method, route group, status, milliseconds; never
+  the path or query, which contain look-ups).
   Secrets (wuDict's token, passwords, cookies) are never logged; the one exception is the bootstrap
   one-time password, logged once.
 - The audit log of admin actions is under *Admin → Audit log*.
 - Disk: *Admin → Storage* shows usage per dictionary and can delete originals, indexes, rejected
   proposals and orphaned files, always after a dry-run preview ([ADR 0009](adr/0009-storage-administration.md)).
+
+## Metrics
+
+Off by default. With `METRICS=true` the gateway serves Prometheus metrics at `/metrics` to admins (open
+it in the browser while signed in) and to requests that send `Authorization: Bearer <METRICS_TOKEN>`
+([ADR 0010](adr/0010-metrics-access.md)). There is no address-based exception: behind a proxy on the
+same host every request would look local.
+
+```yaml
+# prometheus.yml (Prometheus on the same Docker network as the app)
+scrape_configs:
+  - job_name: pxdict
+    metrics_path: /metrics
+    authorization: { credentials: "<METRICS_TOKEN>" }
+    static_configs: [{ targets: ["app:8080"] }]
+```
+
+| Metric | Meaning |
+|---|---|
+| `pxdict_http_requests_total{method,route,status}` | Requests per route group (`/api/search`, `/app-api/me`, `/res`, `static`, …) |
+| `pxdict_http_request_duration_seconds{route}` | Histogram of the time until response headers (streams continue after) |
+| `pxdict_http_requests_in_flight` | Requests being handled |
+| `pxdict_process_resident_memory_bytes`, `pxdict_nodejs_heap_used_bytes`, … | Gateway memory (wuDict is a separate process: use `docker stats` for the container) |
+| `pxdict_nodejs_eventloop_delay_seconds{quantile}` | Event-loop delay since the previous scrape |
+| `pxdict_users`, `pxdict_dictionaries`, `pxdict_proposals{status}` | Totals from the gateway database |
+
+## Load testing
+
+`scripts/load-test.mjs` (no dependencies) signs in once and lets N virtual users look up words seeded
+from `/api/suggest`, then prints throughput and latency percentiles of `/api/search` (time until the
+whole NDJSON body arrived). Run it once through the gateway and once against wuDict directly, both from
+inside the container so the network is the same:
+
+```bash
+read -rsp 'password: ' LOAD_PASSWORD
+sudo docker compose exec -T -e LOAD_LOGIN=admin -e LOAD_PASSWORD="$LOAD_PASSWORD" app node --input-type=module - \
+  --url http://127.0.0.1:8080 --origin "https://dict.example.com" --users 20 --think 1000 < scripts/load-test.mjs
+sudo docker compose exec -T app node --input-type=module - \
+  --direct http://127.0.0.1:6888 --users 20 --think 1000 < scripts/load-test.mjs
+```
+
+`--origin` must be `PUBLIC_URL` (the sign-in request passes the origin check). `--think` is the pause
+between one user's look-ups; `0` sends them back to back.
+
+Reference numbers (2026-11-26, image of this repository with wuDict v3.7.11, container limited to
+1 CPU and 1 GB, one 100,000-headword DSL dictionary, history recording on, the load generator inside
+the same container and CPU budget):
+
+| Load | Target | req/s | p50 ms | p95 ms | p99 ms |
+|---|---|---|---|---|---|
+| 10 users, 1 look-up/s each | gateway | 9.5 | 17 | 156 | 550 |
+| | wuDict direct | 9.8 | 10 | 87 | 99 |
+| 20 users, 1 look-up/s each | gateway | 19.0 | 18 | 188 | 372 |
+| | wuDict direct | 19.2 | 11 | 178 | 297 |
+| 10 users, back to back | gateway | 46 | 198 | 404 | 595 |
+| | wuDict direct | 76 | 112 | 277 | 364 |
+| 20 users, back to back | gateway | 43 | 396 | 825 | 1682 |
+| | wuDict direct | 70 | 284 | 533 | 690 |
+
+At realistic rates the gateway adds a few milliseconds per look-up and no errors; the container used
+about 100 MiB of RAM. Saturated, on one CPU shared with wuDict and the load generator, it delivers about
+60 % of wuDict's throughput. CPU profiles put most of the gateway's cost in SQLite work per look-up
+(the session check through Better Auth, the user's dictionary view, and writing search history);
+compiled statements are cached per connection (`cacheStatements` in `gateway/src/db/client.ts`).
+
+## Verify in production
+
+The original design's §12 checklist, updated for PXDict. Tick these on a real deployment:
+
+- [ ] Sign-in through the public hostname sets the `pxdict.session_token` cookie (`Secure`, `HttpOnly`,
+      `SameSite=Lax`) and the installed PWA stays signed in after a restart (Android Chrome, iOS Safari).
+- [ ] A passkey can be registered and used from the installed PWA (needs the final `PUBLIC_URL` host).
+- [ ] Articles of an untrusted dictionary render in the sandboxed frame and load their images, styles and
+      audio through `/r/…` via the tunnel; a recent look-up still opens offline.
+- [ ] The Cloudflare cache rule works: responses for `/api/`, `/res/`, `/r/` and `/app-api/` show
+      `cf-cache-status: BYPASS` (or `DYNAMIC`), never `HIT`.
+- [ ] Rate limits see the real client: after 5 wrong passwords from one network, a sixth answers 429,
+      while another network can still sign in.
+- [ ] `/setup`, `/api/library` and `/metrics` (unless enabled) answer 404 from outside.
+- [ ] RAM while indexing your largest dictionary (`docker stats`) stays under `PXDICT_MEM_LIMIT`.
+- [ ] The update timer ran once and a backup was restored on a test machine (Phase 9).
+- [ ] [Load test](#load-testing) on the VPS itself: at 20 users × 1 look-up/s, no errors and a gateway p95
+      close to wuDict's.
+
+Already verified earlier and not repeated here: wuDict answers 401 without its token (Phase 0,
+[`wudict-notes.md`](wudict-notes.md)); `wudict ingest` and copying `db/` from another machine
+(Phase 9, [Indexing off-box](#indexing-off-box)).

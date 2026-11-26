@@ -141,4 +141,24 @@ describe("App", () => {
     });
     expect(location.search).toBe("?next=%2F%3Fq%3Dcat");
   });
+
+  it("moves focus to the new page and names it after client-side navigation", async () => {
+    backend.on("GET", "/app-api/me", () => Response.json(me));
+    backend.on("GET", "/app-api/me/favorites", () => Response.json({ favorites: [] }));
+    mount("/");
+    await vi.waitFor(() => {
+      expect(root.querySelector("a.skip-link")).not.toBeNull();
+    });
+    const skip = root.querySelector<HTMLAnchorElement>("a.skip-link");
+    expect(skip?.getAttribute("href")).toBe("#content");
+    // The skip link is the first focusable element.
+    expect(root.querySelector("a, button, input")).toBe(skip);
+
+    root.querySelector<HTMLAnchorElement>('nav a[href="/favorites"]')?.click();
+    await vi.waitFor(() => {
+      expect(document.activeElement?.id).toBe("content");
+    });
+    expect(document.title).toBe("Saved – PXDict");
+    expect(root.querySelector('nav a[href="/favorites"]')?.getAttribute("aria-current")).toBe("page");
+  });
 });

@@ -1,15 +1,20 @@
 // Builds the gateway's Hono app: security headers, /healthz, Better Auth under /app-api/auth, PXDict's
 // /app-api, the allowlisted wuDict proxy (behind a session check) and the static PWA.
+import { createHash, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import type { Health } from "@pxdict/shared";
-import { Hono, type MiddlewareHandler } from "hono";
+import { count, sql } from "drizzle-orm";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { authBasePath, clientIpHeader, type Auth } from "./auth/auth";
 import { createGuards, type AuthEnv } from "./auth/guards";
 import { createAuthRoutes } from "./auth/routes";
 import type { Config } from "./config";
 import { pingDatabase, type Db } from "./db/client";
+import * as schema from "./db/schema";
 import { clientIp } from "./http/client-ip";
 import { jsonError } from "./http/errors";
+import { Metrics, metricsContentType, routeGroup } from "./http/metrics";
 import { originCheck } from "./http/origin";
 import { securityHeaders } from "./http/security";
 import type { Logger } from "./log";
@@ -56,6 +61,14 @@ const oauthCallbackPattern = new RegExp(`^${authBasePath}/callback/[^/]+$`);
 /** Better Auth admin endpoints that a non-admin may call: ending an impersonation. */
 const authAdminExceptions = new Set([`${authBasePath}/admin/stop-impersonating`]);
 
+/**
+ * Largest request body on /app-api (JSON, and Better Auth's forms), so nobody, signed in or not, can make
+ * the gateway buffer an arbitrary body. Big enough for the largest shared schema (a 500-item storage
+ * plan). Proposal file chunks are streamed to disk with their own limits instead.
+ */
+export const maxJsonBodyBytes = 1024 * 1024;
+const uploadChunkPattern = /^\/app-api\/proposals\/[0-9a-f]{24}\/files\/[0-9]{1,3}$/;
+
 /** Time allowed for wuDict to answer the health check. */
 const healthTimeoutMs = 3_000;
 
@@ -67,12 +80,35 @@ export interface AppServices {
   storage: StorageService;
   /** Requests in flight and the time the last one started (jobs.ts runs VACUUM only when idle). */
   activity: { inFlight: number; lastRequestAt: number };
+  /** Set when METRICS is on. */
+  metrics: Metrics | undefined;
+}
+
+/** Constant-time comparison of a bearer token (hashed first so lengths always match). */
+function tokenMatches(given: string, expected: string): boolean {
+  const h = (s: string) => createHash("sha256").update(s).digest();
+  return timingSafeEqual(h(given), h(expected));
 }
 
 export function createApp(opts: AppOptions): Hono<AuthEnv> & { services: AppServices } {
   const { version, config, logger, db, wudict, auth } = opts;
   const app = new Hono<AuthEnv>();
   const guards = createGuards(auth, { requireAdmin2fa: config.auth.requireAdmin2fa });
+
+  const metrics = config.metrics.enabled ? new Metrics() : undefined;
+  if (metrics) app.use("*", metrics.middleware());
+
+  // Access log at debug level: the route group, never the path or query (they hold lookups).
+  app.use("*", async (c, next) => {
+    const start = performance.now();
+    await next();
+    logger.debug("request", {
+      method: c.req.method,
+      route: routeGroup(c.req.path),
+      status: c.res.status,
+      ms: Math.round(performance.now() - start),
+    });
+  });
 
   const activity = { inFlight: 0, lastRequestAt: Date.now() };
   app.use("*", async (_c, next) => {
@@ -85,6 +121,14 @@ export function createApp(opts: AppOptions): Hono<AuthEnv> & { services: AppServ
     }
   });
   app.use("*", securityHeaders({ hsts: config.publicUrl.protocol === "https:" }));
+
+  const jsonBodyLimit: MiddlewareHandler = bodyLimit({
+    maxSize: maxJsonBodyBytes,
+    onError: (c) => jsonError(c, 413, "payload_too_large", "request body is too large"),
+  });
+  const limitBodies: MiddlewareHandler = (c, next) =>
+    c.req.method === "PUT" && uploadChunkPattern.test(c.req.path) ? next() : jsonBodyLimit(c, next);
+  app.use("/app-api/*", limitBodies);
 
   app.get("/healthz", async (c) => {
     c.header("Cache-Control", "no-store");
@@ -103,6 +147,42 @@ export function createApp(opts: AppOptions): Hono<AuthEnv> & { services: AppServ
     if (!ok) logger.warn("health check failed", { checks });
     return c.json({ status: ok ? "ok" : "unavailable", version, checks } satisfies Health, ok ? 200 : 503);
   });
+
+  if (metrics) {
+    const token = config.metrics.token;
+    // A scraper presents METRICS_TOKEN; a person signs in as an admin.
+    const metricsAccess: MiddlewareHandler<AuthEnv> = (c, next) => {
+      const given = /^Bearer (.+)$/i.exec(c.req.header("authorization") ?? "")?.[1];
+      if (token && given !== undefined && tokenMatches(given, token)) return next();
+      return guards.requireAdmin(c, next);
+    };
+    const total = (rows: { n: number }[]) => rows[0]?.n ?? 0;
+    metrics.addGauge({
+      name: "pxdict_users",
+      help: "User accounts.",
+      read: () => [{ labels: {}, value: total(db.select({ n: count() }).from(schema.user).all()) }],
+    });
+    metrics.addGauge({
+      name: "pxdict_dictionaries",
+      help: "Dictionaries in the gateway's catalogue.",
+      read: () => [{ labels: {}, value: total(db.select({ n: count() }).from(schema.dictionaries).all()) }],
+    });
+    metrics.addGauge({
+      name: "pxdict_proposals",
+      help: "Dictionary proposals, by status.",
+      read: () =>
+        db
+          .select({ status: schema.proposals.status, n: sql<number>`count(*)` })
+          .from(schema.proposals)
+          .groupBy(schema.proposals.status)
+          .all()
+          .map((r) => ({ labels: { status: r.status }, value: r.n })),
+    });
+    app.get("/metrics", metricsAccess, (c: Context) => {
+      c.header("Cache-Control", "no-store");
+      return c.body(metrics.render(), 200, { "Content-Type": metricsContentType });
+    });
+  }
 
   app.route("/", createAuthRoutes({ config, db, guards, emailEnabled: opts.emailEnabled }));
 
@@ -205,5 +285,5 @@ export function createApp(opts: AppOptions): Hono<AuthEnv> & { services: AppServ
     return jsonError(c, 500, "internal", "internal server error");
   });
 
-  return Object.assign(app, { services: { proposals, publisher, registry, storage, activity } });
+  return Object.assign(app, { services: { proposals, publisher, registry, storage, activity, metrics } });
 }

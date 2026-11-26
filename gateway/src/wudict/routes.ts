@@ -29,6 +29,7 @@ const reservedRoots = new Set([
   "groups",
   "browse",
   "healthz",
+  "metrics",
   "wudict-admin",
 ]);
 
