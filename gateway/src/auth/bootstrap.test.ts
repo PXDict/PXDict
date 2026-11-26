@@ -99,4 +99,19 @@ describe("pxdict-gateway user reset-password (process)", () => {
       fs.rmSync(dataDir, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it("db backup writes a copy and refuses to overwrite it", async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "pxdict-cli-"));
+    try {
+      const env = { PATH: process.env.PATH ?? "", DATA_DIR: dataDir };
+      const out = path.join(dataDir, "tmp", "snap.db");
+      const ok = await exec(tsx, [main, "db", "backup", out], { env });
+      expect(ok.stdout).toBe(`${out}\n`);
+      expect(fs.statSync(out).size).toBeGreaterThan(0);
+      const again = await exec(tsx, [main, "db", "backup", out], { env }).catch((e: unknown) => e);
+      expect(again).toMatchObject({ code: 1 });
+    } finally {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });

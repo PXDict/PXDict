@@ -1,0 +1,15 @@
+# Pulls a new PXDict image and restarts the app when it changed (scripts/server-update.sh).
+# Install: docs/operations.md#updates. Settings go in /opt/pxdict/backup.env (optional).
+[Unit]
+Description=Update PXDict
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PXDICT_DIR=/opt/pxdict
+# e.g. PXDICT_BACKUP_BEFORE_UPDATE=1 plus the BACKUP_* settings of pxdict-backup.service.
+EnvironmentFile=-/opt/pxdict/backup.env
+ExecStart=/opt/pxdict/scripts/server-update.sh
+TimeoutStartSec=30min

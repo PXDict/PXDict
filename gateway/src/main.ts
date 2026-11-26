@@ -3,6 +3,7 @@
 //
 //   node pxdict-gateway.mjs                                   run the server
 //   node pxdict-gateway.mjs user reset-password <email|username>   rescue: print a new password
+//   node pxdict-gateway.mjs db backup <file>                       snapshot pxdict.db (scripts/backup.sh)
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -12,7 +13,7 @@ import { createAuth } from "./auth/auth";
 import { bootstrapAdmin, resetPasswordCli } from "./auth/bootstrap";
 import { createSmtpMailer } from "./auth/mailer";
 import { ConfigError, loadConfig, type Config } from "./config";
-import { databaseFile, openDatabase, type Db } from "./db/client";
+import { backupDatabase, databaseFile, openDatabase, type Db } from "./db/client";
 import { startJobs } from "./jobs";
 import { createLogger, type Logger } from "./log";
 import { WudictCatalog } from "./wudict/catalog";
@@ -28,11 +29,24 @@ function definedEnv(): Record<string, string> {
   return Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => !!e[1]?.trim()));
 }
 
-const usage = "usage: node pxdict-gateway.mjs [user reset-password <email|username>]";
+const usage = "usage: node pxdict-gateway.mjs [user reset-password <email|username> | db backup <file>]";
 
-/** `user reset-password <email|username>`: sets a random password, signs the user out, prints it. */
+/**
+ * `user reset-password <email|username>`: sets a random password, signs the user out, prints it.
+ * `db backup <file>`: writes a consistent copy of the database to <file> (absolute, must not exist).
+ */
 async function runCli(args: string[], config: Config, db: Db, logger: Logger): Promise<number> {
   const [group, command, identifier, ...rest] = args;
+  if (group === "db" && command === "backup" && identifier && !rest.length) {
+    try {
+      backupDatabase(db, identifier);
+    } catch (err) {
+      process.stderr.write(`backup failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      return 1;
+    }
+    process.stdout.write(`${identifier}\n`);
+    return 0;
+  }
   if (group !== "user" || command !== "reset-password" || !identifier || rest.length) {
     process.stderr.write(`${usage}\n`);
     return 2;

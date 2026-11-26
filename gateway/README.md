@@ -73,13 +73,16 @@ indexes them in the background (rescan + ingest) before users see the dictionary
 withdrawing deletes the files at once. `/app-api/admin/dicts` changes visibility, owner, title and trusted
 rendering, rescans, and retries indexing. The hourly job drops uploads unfinished for 24 hours.
 
-Rescue (e.g. a forgotten admin password), from the container or with `DATA_DIR` set:
+Command line, from the container or with `DATA_DIR` set (see [`docs/operations.md`](../docs/operations.md)):
 
 ```bash
 docker exec -it pxdict node /app/pxdict-gateway.mjs user reset-password <email|username>
+docker exec pxdict node /app/pxdict-gateway.mjs db backup /data/tmp/pxdict-copy.db
 ```
 
-It prints a new random password and signs that user out everywhere.
+`user reset-password` prints a new random password and signs that user out everywhere (rescue for a
+forgotten admin password). `db backup` writes a consistent copy of the database with `VACUUM INTO`
+(safe while the server runs; the file must not exist); `scripts/backup.sh` uses it.
 
 ## Layout
 

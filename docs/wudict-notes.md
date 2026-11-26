@@ -297,6 +297,13 @@ is rescanned, indexed and searchable"):
   `uuid = <32 hex digits>` (e.g. `uuid = f4db34b10ddaf4f2be36ff2eb79bb6ed`). Other keys: `name`,
   `format`, `entries`, `index`, `media`, `source`, `source_size`, `source_mtime`, `imported`.
 
+## Phase 9 additions
+
+- Off-box indexing as documented in `operations.md#indexing-off-box` (the image with `--entrypoint wudict
+  ingest -full`, the entrypoint's `HOME`/`XDG_*`/`DICT_DIR`/`DB_DIR`, the same
+  `/data/dictionaries/<folder>/` path) produces `db/<name>/`; copied with the originals to another `/data`,
+  a server started there lists the dictionary with that `dbPath` and leaves `text.db` untouched.
+
 ## Open questions
 
 Nothing blocks Phase 1. These have a fallback and are re-checked later:

@@ -98,6 +98,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   `wudict-<tag>-<sha>`, and `X.Y.Z`/`X.Y` for releases (`docs/releasing.md`). Shared
   `.github/actions/build-wudict`; Dependabot groups Better Auth separately and covers the `Dockerfile`
   base images, which are now written out in each `FROM`.
+- Phase 9: self-hosting. `deploy/compose.yaml` (app + optional cloudflared profile, three memory-limit
+  layers, no published port), `deploy/.env.example` and `deploy/backup.env.example`;
+  `scripts/setup-swap.sh`, `scripts/server-update.sh` (pull, optional backup, recreate, wait for
+  healthy), `scripts/backup.sh` (encrypted age/gpg archive of a `VACUUM INTO` snapshot of `pxdict.db`,
+  the generated secret, wuDict config, `compose.yaml` and `.env`) and `scripts/restore.sh`; systemd
+  timers for updates and backups (`deploy/systemd/`); the gateway CLI command
+  `pxdict-gateway db backup <file>`; the runbook `docs/operations.md` (Cloudflare tunnel and cache
+  rules, reverse proxies, memory sizing, sign-in provider setup, admin password reset, rsync and
+  off-box indexing, updates, rollback, backups and restore).
 
 ### Changed
 - Reference wuDict version is v3.7.11 (v3.7.12 is only a pre-release).

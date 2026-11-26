@@ -41,6 +41,18 @@ export function openDatabase({ file, migrationsDir }: OpenDatabaseOptions): Db {
   }
 }
 
+/**
+ * Writes a consistent, compacted copy of the database to `file` with `VACUUM INTO` (safe while the
+ * server is running: it reads one snapshot). The file must not exist yet. Used by
+ * `pxdict-gateway db backup` and scripts/backup.sh.
+ */
+export function backupDatabase(db: Db, file: string): void {
+  if (!path.isAbsolute(file)) throw new Error("the backup file must be an absolute path");
+  if (fs.existsSync(file)) throw new Error("the backup file already exists");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  db.$client.prepare("VACUUM INTO ?").run(file);
+}
+
 /** Cheap liveness check for /healthz. */
 export function pingDatabase(db: Db): boolean {
   try {
