@@ -1,0 +1,54 @@
+# PXDict on a small VPS (docs/operations.md). Copy this file and .env.example to /opt/pxdict:
+#
+#   sudo mkdir -p /opt/pxdict/data && sudo chown -R 1000:1000 /opt/pxdict/data
+#   cp deploy/compose.yaml /opt/pxdict/ && cp deploy/.env.example /opt/pxdict/.env   # then edit .env
+#   cd /opt/pxdict && docker compose up -d && docker compose logs -f app
+#
+# The cloudflared service runs only with COMPOSE_PROFILES=cloudflared (set in .env). Without it, put
+# your own TLS reverse proxy in front of 127.0.0.1:8080 (uncomment `ports` below).
+name: pxdict
+
+services:
+  app:
+    # Pin a tag (e.g. :wudict-v3.7.11 or :1.2.0) to control when updates happen; see docs/releasing.md.
+    image: ${PXDICT_IMAGE:-ghcr.io/thanhhvnqb/pxdict:latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Variables that are not settings of PXDict itself stay out of the container.
+      PXDICT_IMAGE: ""
+      COMPOSE_PROFILES: ""
+      CLOUDFLARE_TUNNEL_TOKEN: ""
+    # One volume, one filesystem: approving a proposal renames files from /data/proposals into
+    # /data/dictionaries, so do not mount dictionaries/ separately. Owned by uid 1000.
+    volumes:
+      - ./data:/data
+    # No published port with cloudflared: only the tunnel reaches the app on the internal network.
+    # With your own reverse proxy on this host, publish on loopback only:
+    # ports:
+    #   - "127.0.0.1:8080:8080"
+    # Memory, layer 2 and 3 of 3 (layer 1 is MEMORY_LIMIT / GATEWAY_MAX_OLD_SPACE_MB in .env):
+    # a hard RAM cap, and RAM + swap together. Sizes per VPS are in docs/operations.md#memory.
+    mem_limit: ${PXDICT_MEM_LIMIT:-768m}
+    memswap_limit: ${PXDICT_MEMSWAP_LIMIT:-2560m}
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+    networks: [internal]
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.11.2
+    profiles: [cloudflared]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 128m
+    networks: [internal]
+
+networks:
+  internal: {}

@@ -384,15 +384,23 @@ audit log. Whole-dictionary deletion is checked against the real wuDict binary i
 
 **Goal:** run for real on a 1–2 GB VPS via cloudflared (original §8–10).
 
-- [ ] `deploy/compose.yaml` (app + optional cloudflared), `.env.example` adding `PUBLIC_URL`, `BETTER_AUTH_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `REGISTRATION`, `MAX_UPLOAD_BYTES`, SMTP and OAuth/OIDC provider variables (commented out).
-- [ ] `scripts/setup-swap.sh` and the three memory-limit layers (original §9); budget the gateway's RAM (Node.js ~50–80 MB idle, V8 heap capped) and peaks during upload/zip checks. Phase 0 numbers: wuDict ~50 MB idle, ~260–300 MB peak while ingesting 1M headwords (`INDEX_WORKERS=1`).
-- [ ] Cloudflare: tunnel, Public Hostname, Cache Rule bypass for `/api/`, `/res/`, `/r/`, `/app-api/`, `/files/`, `/style/`. **Upload limit:** Cloudflare caps request bodies at 100 MB on the Free plan → larger proposals need chunked uploads (Phase 6) or admin rsync.
-- [ ] OAuth/OIDC provider setup guide: redirect URI `${PUBLIC_URL}/app-api/auth/callback/<provider>`, passkeys need a stable `PUBLIC_URL` host.
-- [ ] `scripts/server-update.sh` + systemd timer (original §10).
-- [ ] **Backups**: `scripts/backup.sh` using `sqlite3 .backup` (or `VACUUM INTO`) for `pxdict.db` + wuDict config; restore docs. Backups contain session tokens and OAuth tokens: store them encrypted. Original dictionaries are backed up separately (large).
-- [ ] Runbook `docs/operations.md`: first login, enabling sign-in methods, admin password reset (CLI), adding dictionaries via rsync, indexing off-box (same image **and the same `/data/dictionaries/...` path**, or the copied `db/` is ignored), rolling back the image, restoring a backup.
+- [x] `deploy/compose.yaml` (app + optional cloudflared), `.env.example` adding `PUBLIC_URL`, `BETTER_AUTH_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `REGISTRATION`, `MAX_UPLOAD_BYTES`, SMTP and OAuth/OIDC provider variables (commented out).
+- [x] `scripts/setup-swap.sh` and the three memory-limit layers (original §9); budget the gateway's RAM (Node.js ~50–80 MB idle, V8 heap capped) and peaks during upload/zip checks. Phase 0 numbers: wuDict ~50 MB idle, ~260–300 MB peak while ingesting 1M headwords (`INDEX_WORKERS=1`).
+- [x] Cloudflare: tunnel, Public Hostname, Cache Rule bypass for `/api/`, `/res/`, `/r/`, `/app-api/`, `/files/`, `/style/`. **Upload limit:** Cloudflare caps request bodies at 100 MB on the Free plan → larger proposals need chunked uploads (Phase 6) or admin rsync.
+- [x] OAuth/OIDC provider setup guide: redirect URI `${PUBLIC_URL}/app-api/auth/callback/<provider>`, passkeys need a stable `PUBLIC_URL` host.
+- [x] `scripts/server-update.sh` + systemd timer (original §10).
+- [x] **Backups**: `scripts/backup.sh` using `sqlite3 .backup` (or `VACUUM INTO`) for `pxdict.db` + wuDict config; restore docs. Backups contain session tokens and OAuth tokens: store them encrypted. Original dictionaries are backed up separately (large).
+- [x] Runbook `docs/operations.md`: first login, enabling sign-in methods, admin password reset (CLI), adding dictionaries via rsync, indexing off-box (same image **and the same `/data/dictionaries/...` path**, or the copied `db/` is ignored), rolling back the image, restoring a backup.
+
+Implemented in `deploy/`, `scripts/` and [`operations.md`](operations.md). Verified locally with the
+image: `server-update.sh` against a local registry (first start and no-op), `backup.sh` + `restore.sh`
+round trip (a password changed after the backup is undone by the restore), and the off-box indexing
+command (the copied index is reused, not rebuilt). The admin password reset already existed
+(`pxdict-gateway user reset-password`); `pxdict-gateway db backup` was added because the image has no
+`sqlite3`.
 
 **Done when:** stable for one week on a real VPS, the update timer has run at least once, a test restore succeeded.
+- [ ] Running on a real VPS for one week, with the update timer having run and a test restore done (manual).
 
 ---
 

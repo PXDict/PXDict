@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { migrationsDir } from "../test/harness";
-import { databaseFile, openDatabase, pingDatabase } from "./client";
+import { backupDatabase, databaseFile, openDatabase, pingDatabase } from "./client";
 import { auditLog, dictionaries } from "./schema";
 
 describe("openDatabase", () => {
@@ -47,5 +47,30 @@ describe("openDatabase", () => {
 
     db.insert(auditLog).values({ action: "dict.rescan", detailsJson: { added: 1 } }).run();
     expect(db.select().from(auditLog).get()).toMatchObject({ action: "dict.rescan", detailsJson: { added: 1 } });
+  });
+});
+
+describe("backupDatabase", () => {
+  it("writes a consistent copy that opens on its own, and never overwrites", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pxdict-backup-"));
+    try {
+      const db = openDatabase({ file: databaseFile(dir), migrationsDir });
+      db.insert(dictionaries).values({ id: "oxford", title: "Oxford", source: "builtin" }).run();
+      const file = path.join(dir, "out", "pxdict.db");
+      backupDatabase(db, file);
+      expect(() => {
+        backupDatabase(db, file);
+      }).toThrow(/already exists/);
+      expect(() => {
+        backupDatabase(db, "relative.db");
+      }).toThrow(/absolute/);
+      db.$client.close();
+
+      const copy = openDatabase({ file, migrationsDir });
+      expect(copy.select().from(dictionaries).all().map((d) => d.id)).toEqual(["oxford"]);
+      copy.$client.close();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

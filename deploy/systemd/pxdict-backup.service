@@ -1,0 +1,14 @@
+# Encrypted backup of the gateway database, secrets and wuDict config (scripts/backup.sh).
+# Install: docs/operations.md#backups. Settings (BACKUP_AGE_RECIPIENTS, BACKUP_DIR, ...) go in
+# /opt/pxdict/backup.env.
+[Unit]
+Description=Back up PXDict
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+Environment=PXDICT_DIR=/opt/pxdict
+EnvironmentFile=/opt/pxdict/backup.env
+ExecStart=/opt/pxdict/scripts/backup.sh
+TimeoutStartSec=30min

@@ -26,3 +26,7 @@ updates:
       # Node.js stays on the LTS line chosen in AGENTS.md; a new major is a deliberate change.
       - dependency-name: node
         update-types: ["version-update:semver-major"]
+  - package-ecosystem: docker-compose
+    # deploy/compose.yaml: the cloudflared tag (the PXDict image itself follows `latest` or a pin).
+    directory: /deploy
+    schedule: { interval: weekly }

@@ -1,0 +1,11 @@
+# Daily update, after CI's nightly build has had time to publish a new image (docs/releasing.md).
+[Unit]
+Description=Update PXDict daily
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

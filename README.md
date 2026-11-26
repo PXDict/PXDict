@@ -47,9 +47,10 @@ See [`AGENTS.md`](AGENTS.md) for the architecture rules and [`docs/PLAN.md`](doc
 
 ## Quick start
 
-> Work in progress — Phases 0–5 of the [plan](docs/PLAN.md) are done: accounts and sign-in (Better
-> Auth), the lookup PWA (offline-capable), and per-user history, dictionary selection, saved words and
-> settings. Dictionary proposals and the admin screens come next. On first start, the log shows the
+> Work in progress — Phases 0–9 of the [plan](docs/PLAN.md) are implemented: accounts and sign-in
+> (Better Auth), the lookup PWA (offline-capable), per-user data, dictionary proposals, storage
+> administration, published images and self-hosting ([`docs/operations.md`](docs/operations.md)).
+> Hardening (Phase 10) comes next. On first start, the log shows the
 > `admin` user's one-time password unless `ADMIN_EMAIL` / `ADMIN_PASSWORD` are set
 > (see [`gateway/README.md`](gateway/README.md)).
 
@@ -64,7 +65,7 @@ docker build -t pxdict:dev .
 scripts/smoke-test.sh pxdict:dev
 docker run --rm -p 8080:8080 -v pxdict-data:/data pxdict:dev   # http://localhost:8080
 
-# self-hosting (Phase 9)
+# self-hosting: see docs/operations.md
 cp deploy/.env.example deploy/.env   # fill in values
 docker compose -f deploy/compose.yaml up -d
 ```
