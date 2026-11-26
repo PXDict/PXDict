@@ -406,12 +406,31 @@ command (the copied index is reused, not rebuilt). The admin password reset alre
 
 ## Phase 10 — Hardening & polish
 
-- [ ] Full security review: Better Auth configuration (origins, cookies, account linking, rate limits), CSRF/origin checks, path traversal in upload/delete, SSRF via `source_url` (never auto-fetch URLs), headers, iframe CSP.
-- [ ] Light load test: 10–20 concurrent users on a 1 GB VPS; compare p95 of `/api/search` through the gateway vs. direct wuDict.
-- [ ] Structured JSON logs, optional Prometheus `/metrics` (admin or loopback only).
+- [x] Full security review: Better Auth configuration (origins, cookies, account linking, rate limits), CSRF/origin checks, path traversal in upload/delete, SSRF via `source_url` (never auto-fetch URLs), headers, iframe CSP.
+- [x] Light load test: 10–20 concurrent users on a 1 GB VPS; compare p95 of `/api/search` through the gateway vs. direct wuDict.
+- [x] Structured JSON logs, optional Prometheus `/metrics` (admin or ~~loopback~~ token only, [ADR 0010](adr/0010-metrics-access.md)).
 - [ ] Accessibility (keyboard, screen readers, contrast), PWA performance (Lighthouse ≥ 90).
 - [ ] Complete the "verify in production" checklist from original §12.
 - [ ] (Out of current scope, recorded as ideas) full offline lookups via OPFS + js-mdict; propose an official image upstream to wuDict / PikaPods.
+
+Done so far:
+
+- **Security review:** [`security-review.md`](security-review.md). One real finding, fixed: `/app-api`
+  request bodies (Better Auth's unauthenticated endpoints included) had no size limit; they are now
+  capped at 1 MiB, proposal chunks excepted. A route sweep test now requires the origin check on every
+  state-changing `/app-api` route.
+- **Load test:** `scripts/load-test.mjs`; results in [`operations.md`](operations.md#load-testing). Run
+  locally on the image with the container limited to 1 CPU and 1 GB (not yet on the VPS; that run is in
+  the production checklist). At 20 users × 1 look-up/s, p95 is 188 ms through the gateway vs. 178 ms
+  direct. A CPU profile led to caching compiled SQLite statements (`cacheStatements`).
+- **Logs and metrics:** logs were already JSON; a debug-level access log (route group, never the path
+  or query) and `METRICS=true` / `METRICS_TOKEN` were added.
+- **Accessibility (partial):** a WCAG AA contrast test over the theme tokens (`pwa/src/styles.test.ts`)
+  and form-field borders raised to 3:1; a skip link; focus moves to the new page and the document title
+  names it after client-side navigation. Still open: a screen-reader pass (VoiceOver, TalkBack) and
+  Lighthouse, which needs a browser and was not run.
+- **Production checklist:** translated and updated in [`operations.md`](operations.md#verify-in-production);
+  to be ticked on the real deployment.
 
 ---
 

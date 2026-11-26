@@ -70,5 +70,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["src/**/*.test.{ts,tsx}"],
+    // styles.test.ts reads the stylesheet's source (`?raw`); Vitest empties CSS it does not process.
+    css: { include: [/styles\.css/] },
   },
 });

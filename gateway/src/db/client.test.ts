@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { migrationsDir } from "../test/harness";
-import { backupDatabase, databaseFile, openDatabase, pingDatabase } from "./client";
+import Database from "better-sqlite3";
+import { backupDatabase, cacheStatements, databaseFile, openDatabase, pingDatabase } from "./client";
 import { auditLog, dictionaries } from "./schema";
 
 describe("openDatabase", () => {
@@ -72,5 +73,56 @@ describe("backupDatabase", () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("cacheStatements", () => {
+  const open = (max?: number) => {
+    const sqlite = new Database(":memory:");
+    cacheStatements(sqlite, max);
+    sqlite.exec("CREATE TABLE t (a INTEGER, b TEXT); INSERT INTO t VALUES (1, 'x'), (2, 'y')");
+    return sqlite;
+  };
+
+  it("reuses a statement for the same SQL and resets its result mode", () => {
+    const sqlite = open();
+    const first = sqlite.prepare("SELECT a, b FROM t ORDER BY a");
+    expect(first.raw().all()).toEqual([[1, "x"], [2, "y"]]);
+    const again = sqlite.prepare("SELECT a, b FROM t ORDER BY a");
+    expect(again).toBe(first);
+    expect(again.all()).toEqual([{ a: 1, b: "x" }, { a: 2, b: "y" }]);
+    expect(sqlite.prepare("SELECT a, b FROM t ORDER BY a").pluck().all()).toEqual([1, 2]);
+    expect(sqlite.prepare("SELECT a, b FROM t ORDER BY a").get()).toEqual({ a: 1, b: "x" });
+    // Statements that return no data have no result mode to reset.
+    const insert = sqlite.prepare("INSERT INTO t VALUES (?, ?)");
+    insert.run(3, "z");
+    expect(sqlite.prepare("INSERT INTO t VALUES (?, ?)")).toBe(insert);
+    sqlite.close();
+  });
+
+  it("hands out a fresh statement while the cached one is busy", () => {
+    const sqlite = open();
+    const sql = "SELECT a FROM t ORDER BY a";
+    const outer = sqlite.prepare(sql);
+    const seen: number[] = [];
+    for (const row of outer.iterate() as IterableIterator<{ a: number }>) {
+      const inner = sqlite.prepare(sql);
+      expect(inner).not.toBe(outer);
+      seen.push(row.a, (inner.all() as { a: number }[]).length);
+    }
+    expect(seen).toEqual([1, 2, 2, 2]);
+    expect(sqlite.prepare(sql)).toBe(outer);
+    sqlite.close();
+  });
+
+  it("keeps at most `max` statements, dropping the least recently used", () => {
+    const sqlite = open(2);
+    const a = sqlite.prepare("SELECT 1");
+    const b = sqlite.prepare("SELECT 2");
+    expect(sqlite.prepare("SELECT 1")).toBe(a);
+    sqlite.prepare("SELECT 3");
+    expect(sqlite.prepare("SELECT 1")).toBe(a);
+    expect(sqlite.prepare("SELECT 2")).not.toBe(b);
+    sqlite.close();
   });
 });

@@ -107,6 +107,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   `pxdict-gateway db backup <file>`; the runbook `docs/operations.md` (Cloudflare tunnel and cache
   rules, reverse proxies, memory sizing, sign-in provider setup, admin password reset, rsync and
   off-box indexing, updates, rollback, backups and restore).
+- Phase 10 (hardening, in progress): security review (`docs/security-review.md`); a 1 MiB limit on
+  every `/app-api` request body (proposal chunks excepted), which also covers Better Auth's
+  unauthenticated endpoints; a test that every state-changing `/app-api` route enforces the origin
+  check; optional Prometheus metrics at `/metrics` (`METRICS`, `METRICS_TOKEN`, ADR 0010) and a
+  debug-level access log; a per-connection cache of compiled SQLite statements; `scripts/load-test.mjs`
+  with reference numbers in `docs/operations.md`; PWA accessibility: skip link, focus and document title
+  on navigation, form-field borders at 3:1 contrast, and a contrast test over the theme colours; the
+  production checklist from the original design, translated into `docs/operations.md`.
 
 ### Changed
 - Reference wuDict version is v3.7.11 (v3.7.12 is only a pre-release).

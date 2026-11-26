@@ -106,6 +106,8 @@ for path in /setup /api/setup /api/library /api/rescan /api/config /api/prefs /a
   status "$path" 404
 done
 status "/api/library?dict=x" 404 -X DELETE
+# Off unless METRICS=true (ADR 0010).
+status /metrics 404
 status "/?k=$token" 200
 header "/?k=$token" set-cookie '^$'
 
